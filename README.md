@@ -5,6 +5,18 @@
 
 [Project Webpage](https://diff3f.github.io/) | [Paper](https://arxiv.org/abs/2311.17024)
 
+## BugNIST Project Documentation
+
+This fork contains local BugNIST mesh and point-cloud experiments.
+
+Start here:
+
+- [Documentation Index](documentation/README.md)
+- [Command Guide](documentation/guides/COMMAND_GUIDE.md)
+- [Diff3F Descriptors Explained](documentation/information/DIFF3F_DESCRIPTORS_EXPLAINED.md)
+- [2D Debug Images Explained](documentation/information/DIFF3F_2D_DEBUG_IMAGES_EXPLAINED.md)
+- [Scripts Map](scripts/README.md)
+
 
 ## Setup
 ```shell

@@ -152,6 +152,27 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
+# Diff3F / BugNIST local data and generated artifacts
+bugNIST/
+output/
+debug/
+previews/
+pointclouds/
+visualizations/
+hf_cache/
+torch_cache/
+logs/
+
+# Generated geometry and descriptor files
+meshes/bugnist/
+meshes/bugnist_individual/
+*.pt
+*.pth
+*.blend
+*.blend1
+*.tif
+*.tiff
+
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
