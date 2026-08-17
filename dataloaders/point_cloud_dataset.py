@@ -6,7 +6,18 @@ from utils import to_numpy, to_tensor
 import torch
 from torch.utils.data import Dataset
 from tqdm.auto import tqdm
-from torch_cluster import knn
+try:
+    from torch_cluster import knn
+except ModuleNotFoundError:
+    def knn(x, y, k, batch_x=None, batch_y=None, num_workers=1):
+        if batch_x is not None or batch_y is not None:
+            raise ModuleNotFoundError(
+                "torch_cluster is required for batched knn; install torch-cluster "
+                "or call this fallback without batch_x/batch_y."
+            )
+        neighbor_idx = torch.cdist(y, x).topk(k, largest=False).indices
+        query_idx = torch.arange(y.shape[0], device=y.device).repeat_interleave(k)
+        return torch.stack([query_idx, neighbor_idx.reshape(-1)], dim=0)
 
 
 np.random.seed(42)

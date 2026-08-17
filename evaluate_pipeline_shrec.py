@@ -8,7 +8,7 @@ from dataloaders.point_cloud_dataset import PointCloudDataset
 from correspondence import ShapeCorr
 import torch
 import glob
-from utils import cosine_similarity, solve_correspondence, gmm
+from utils import cosine_similarity, gmm
 from tqdm import tqdm
 import pandas as pd
 import numpy as np
@@ -20,6 +20,7 @@ results_path = "output/SHREC"
 num_points = 1024
 save_path = "results/" + results_path.split("/")[-1] + "_num_points_" + str(num_points)
 save_path = save_path+".csv"
+os.makedirs(os.path.dirname(save_path), exist_ok=True)
 print("Saving in ", save_path)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 paths = sorted([str(path) for path in list(Path(results_path).rglob("*.pt"))],key=lambda p: int(os.path.basename(p)[:-3]),)

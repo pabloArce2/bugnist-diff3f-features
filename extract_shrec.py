@@ -48,6 +48,7 @@ target_files = sorted(glob.glob(target_path))
 
 
 def write_config_file():
+    os.makedirs("configs", exist_ok=True)
     config["Parameters"] = {
         "dataset": dataset,
         "method": "dino",

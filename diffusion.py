@@ -9,6 +9,7 @@ from huggingface_hub import hf_hub_download
 from safetensors.torch import load_file
 import cv2
 from torchvision import transforms
+import warnings
 
 
 DIFFUSION_MODEL_ID = "runwayml/stable-diffusion-v1-5"
@@ -64,28 +65,33 @@ def rgb2normalmap(normal_map):
     normal_map = normal_map[:,:,0,:3].numpy()
     min_value = np.min(normal_map)
     max_value = np.max(normal_map)
-    normalized_normal_map = np.where(normal_map != 0, (normal_map - min_value) / (max_value - min_value), 0)
+    span = max(max_value - min_value, 1e-6)
+    normalized_normal_map = np.where(normal_map != 0, (normal_map - min_value) / span, 0)
     normal_map_image = (normalized_normal_map * 255).astype(np.uint8)
     detected_map = HWC3(normal_map_image)
     return detected_map
 
 
 
-def init_pipe(device):
-    controlnet = [
-        ControlNetModel.from_pretrained(
-            "lllyasviel/control_v11f1p_sd15_depth",
-            torch_dtype=torch.float16,
-        ),
-        # ControlNetModel.from_pretrained(
-        #     "lllyasviel/control_v11p_sd15_canny",
-        #     torch_dtype=torch.float16,
-        # ),
-        ControlNetModel.from_pretrained(
-        "lllyasviel/control_v11p_sd15_normalbae",
+def init_pipe(device, use_normal_map=True):
+    depth_controlnet = ControlNetModel.from_pretrained(
+        "lllyasviel/control_v11f1p_sd15_depth",
         torch_dtype=torch.float16,
-        ),
-    ]
+    )
+    if use_normal_map:
+        controlnet = [
+            depth_controlnet,
+            # ControlNetModel.from_pretrained(
+            #     "lllyasviel/control_v11p_sd15_canny",
+            #     torch_dtype=torch.float16,
+            # ),
+            ControlNetModel.from_pretrained(
+                "lllyasviel/control_v11p_sd15_normalbae",
+                torch_dtype=torch.float16,
+            ),
+        ]
+    else:
+        controlnet = depth_controlnet
     unet = UNet2DConditionModel.from_config(DIFFUSION_MODEL_ID, subfolder="unet").to(device, torch.float16)
     unet.load_state_dict(load_file(hf_hub_download(repo_id=repo, subfolder="unet", filename=ckpt)))
     pipe = StableDiffusionControlNetImg2ImgPipeline.from_pretrained(
@@ -96,9 +102,19 @@ def init_pipe(device):
         safety_checker=None,
     )
     pipe.set_progress_bar_config(disable=True)
-    pipe = pipe.to(device)
     pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config)
-    pipe.enable_model_cpu_offload()
+    try:
+        pipe.enable_model_cpu_offload()
+    except ImportError as exc:
+        if "accelerate" not in str(exc):
+            raise
+        warnings.warn(
+            "Diffusers could not enable accelerate-based CPU offload. "
+            "Continuing with the full pipeline on the selected device; "
+            "restart the notebook kernel if accelerate was installed recently.",
+            RuntimeWarning,
+        )
+        pipe = pipe.to(device)
     # pipe.enable_xformers_memory_efficient_attention()
     return pipe
 
@@ -128,10 +144,11 @@ def run_diffusion(
 ):
     depth_map = process_depth_map(depth_map)
     # canny = Image.fromarray(np.uint8(rgb2canny(input_image)))
-    control_image = [depth_map]
     if normal_map_input is not None:
         normal_map =  Image.fromarray(rgb2normalmap(normal_map_input))
-        control_image.append(normal_map)
+        control_image = [depth_map, normal_map]
+    else:
+        control_image = depth_map
     generator = torch.manual_seed(60)
     pos_prompt = f"{prompt},best quality,highly detailed,photorealistic,photo"
     negative_prompt = "lowres,low quality,monochrome,watermark"

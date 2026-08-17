@@ -997,9 +997,7 @@ class StableDiffusionControlNetImg2ImgPipeline(
         # 8. Denoising loop
         extract_layer = False
         extract_last_only = False
-        # f_map = torch.zeros((1,320,64,64)).half().to(device)
-        # f_map = torch.zeros((1,640,64,64)).half().to(device)
-        f_map = torch.zeros((1,1280,32,32)).half().to(device)
+        f_map = None
         num_warmup_steps = len(timesteps) - num_inference_steps * self.scheduler.order
         aggregation_steps = (num_inference_steps*3)//4
         f_map_weights = torch.linspace(0.1, 1, steps=aggregation_steps).to(device)
@@ -1065,7 +1063,10 @@ class StableDiffusionControlNetImg2ImgPipeline(
                     extract_layer=extract_layer,
                 )
                 if not extract_last_only and extract_layer:
-                    f_map += torch.nn.functional.normalize(noise_pred[1], dim=1)*f_map_weights[f_map_iters]
+                    normalized_features = torch.nn.functional.normalize(noise_pred[1], dim=1)
+                    if f_map is None:
+                        f_map = torch.zeros_like(normalized_features)
+                    f_map += normalized_features * f_map_weights[f_map_iters].to(dtype=normalized_features.dtype)
                     f_map_iters += 1
                 if extract_last_only and extract_layer:
                     f_map = torch.nn.functional.normalize(noise_pred[1], dim=1)
