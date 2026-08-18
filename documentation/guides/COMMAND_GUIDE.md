@@ -131,6 +131,31 @@ python scripts\preview_geometry_points.py `
   --out previews\bugnist_meshes\bcrick_quick.png
 ```
 
+Rotate a mesh around its own bounding-box center:
+
+```powershell
+python scripts\transform_geometry.py `
+  --kind mesh `
+  --input meshes\bugnist_individual\bcrick_10_001\preprocessed\bcrick_10_001_thr29_roi_keeplargest_ds1.obj `
+  --out meshes\bugnist_individual\bcrick_10_001\rotated\bcrick_10_001_rot_x90.obj `
+  --rotate 90 0 0
+```
+
+Then inspect all Diff3F camera renders from the rotated mesh:
+
+```powershell
+python scripts\debug_2d_diffusion_view.py `
+  --kind mesh `
+  --input meshes\bugnist_individual\bcrick_10_001\rotated\bcrick_10_001_rot_x90.obj `
+  --prompt insect `
+  --outdir debug\bcrick_rot_x90_all_16_renders `
+  --num-views 16 `
+  --height 512 `
+  --width 512 `
+  --render-only `
+  --all-views
+```
+
 ## 5. Compute Mesh Diff3F Features
 
 Local smoke test:
@@ -250,6 +275,21 @@ python scripts\debug_2d_diffusion_view.py `
   --height 512 `
   --width 512 `
   --render-only
+```
+
+Render-only check for every camera view:
+
+```powershell
+python scripts\debug_2d_diffusion_view.py `
+  --kind mesh `
+  --input meshes\bugnist_individual\bcrick_10_001\preprocessed\bcrick_10_001_thr29_roi_keeplargest_ds1.obj `
+  --prompt insect `
+  --outdir debug\bcrick_all_16_renders `
+  --num-views 16 `
+  --height 512 `
+  --width 512 `
+  --render-only `
+  --all-views
 ```
 
 Render/control-only:

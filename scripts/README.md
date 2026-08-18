@@ -15,6 +15,7 @@ preview_tif_volume.py        inspect TIFF CT slices, MIPs, histograms, threshold
 bugnist_tif_to_mesh.py       convert segmented BugNIST CT volume to OBJ/PLY mesh
 bugnist_tif_to_pointcloud.py convert segmented BugNIST CT volume to PLY/NPY point cloud
 mesh_to_pointcloud.py        sample point clouds from existing mesh surfaces
+transform_geometry.py        rotate, scale, or translate meshes and point clouds
 ```
 
 ## Geometry Preview

@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--fit-sample", type=int, default=12000, help="Pixels used to fit PCA feature colors.")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--all-views", action="store_true", help="With --render-only, save every rendered camera view.")
     parser.add_argument("--render-only", action="store_true", help="Only save the selected 2D render view.")
     parser.add_argument("--skip-ai", action="store_true", help="Only save render/control images; do not run diffusion.")
     return parser.parse_args()
@@ -124,6 +125,11 @@ def render_debug_view(args, device, use_normal_map):
         normals = normals.cpu()
     if point_indices is not None:
         point_indices = point_indices.cpu()
+
+    if args.all_views:
+        return {
+            "renders": rendered[:, :, :, :3],
+        }
 
     view = {
         "render": rendered[args.view_index, :, :, :3],
@@ -233,10 +239,24 @@ def make_contact_sheet(outdir, image_paths):
     sheet.save(outdir / "contact_sheet.png")
 
 
+def save_all_render_views(outdir, renders):
+    render_dir = outdir / "renders"
+    render_dir.mkdir(parents=True, exist_ok=True)
+    image_paths = []
+    for view_index, render in enumerate(renders):
+        path = render_dir / f"view_{view_index:03d}.png"
+        image_from_float_rgb(render.numpy()).save(path)
+        image_paths.append((f"view {view_index}", path))
+    return image_paths
+
+
 def write_readme(outdir, args, saved_denoising_steps):
-    file_lines = [
-        "- `01_input_render.png`: the plain 2D render given to image-to-image Stable Diffusion.",
-    ]
+    if args.all_views:
+        file_lines = ["- `renders/view_*.png`: the plain 2D renders for every camera view."]
+    else:
+        file_lines = [
+            "- `01_input_render.png`: the plain 2D render given to image-to-image Stable Diffusion.",
+        ]
     if not args.render_only:
         file_lines.extend(
             [
@@ -284,17 +304,30 @@ def write_readme(outdir, args, saved_denoising_steps):
 def main():
     args = parse_args()
     ensure_square_views(args.num_views)
+    if args.all_views and not args.render_only:
+        raise ValueError("--all-views is only supported together with --render-only.")
+
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
     device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda":
         torch.cuda.set_device(device)
-    use_normal_map = not args.no_normal_map
+    use_normal_map = False if args.render_only else not args.no_normal_map
 
     print(f"Using device: {device}")
-    print(f"Rendering {args.kind} view {args.view_index}/{args.num_views - 1}")
+    if args.all_views:
+        print(f"Rendering all {args.num_views} {args.kind} views")
+    else:
+        print(f"Rendering {args.kind} view {args.view_index}/{args.num_views - 1}")
     view = render_debug_view(args, device, use_normal_map)
+
+    if args.all_views:
+        image_paths = save_all_render_views(outdir, view["renders"])
+        make_contact_sheet(outdir, image_paths)
+        write_readme(outdir, args, [])
+        print(f"Saved {len(image_paths)} render-only views to {outdir}")
+        return
 
     input_render = image_from_float_rgb(view["render"].numpy())
     input_render.save(outdir / "01_input_render.png")
