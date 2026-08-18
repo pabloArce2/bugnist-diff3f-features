@@ -15,6 +15,7 @@ Start here:
 - [Command Guide](documentation/guides/COMMAND_GUIDE.md)
 - [Diff3F Descriptors Explained](documentation/information/DIFF3F_DESCRIPTORS_EXPLAINED.md)
 - [2D Debug Images Explained](documentation/information/DIFF3F_2D_DEBUG_IMAGES_EXPLAINED.md)
+- [Otsu Thresholding Explained](documentation/information/OTSU_THRESHOLDING_EXPLAINED.md)
 - [Scripts Map](scripts/README.md)
 
 

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
+from skimage import filters
 import tifffile
 
 
@@ -27,12 +28,20 @@ def parse_args():
     parser.add_argument("--downsample", type=int, default=1, help="Preview stride in Z/Y/X.")
     parser.add_argument("--roi-start", type=int, nargs=3, metavar=("Z", "Y", "X"))
     parser.add_argument("--roi-size", type=int, nargs=3, metavar=("Z", "Y", "X"))
+    parser.add_argument(
+        "--threshold-method",
+        choices=("auto", "manual", "percentile", "otsu"),
+        default="auto",
+        help=(
+            "How to choose the overlay threshold. "
+            "auto uses --threshold if supplied, then --threshold-percentile if supplied, otherwise Otsu."
+        ),
+    )
     parser.add_argument("--threshold", type=float, help="Manual intensity threshold for overlay.")
     parser.add_argument(
         "--threshold-percentile",
         type=float,
-        default=95.0,
-        help="Intensity percentile for red overlay when --threshold is omitted.",
+        help="Intensity percentile for red overlay, e.g. 95.",
     )
     parser.add_argument("--no-overlay", action="store_true", help="Skip threshold-overlay sheets.")
     return parser.parse_args()
@@ -110,19 +119,45 @@ def selected_indices(length, count):
     return np.linspace(0, length - 1, count, dtype=int).tolist()
 
 
-def threshold_value(volume, threshold, threshold_percentile):
-    if threshold is not None:
-        return threshold
+def threshold_value(volume, threshold, threshold_percentile, threshold_method):
     finite = volume[np.isfinite(volume)]
-    return float(np.percentile(finite, threshold_percentile))
+    if finite.size == 0:
+        raise ValueError("Input volume has no finite voxels.")
+
+    method = threshold_method
+    if method == "auto":
+        if threshold is not None:
+            method = "manual"
+        elif threshold_percentile is not None:
+            method = "percentile"
+        else:
+            method = "otsu"
+
+    if method == "manual":
+        if threshold is None:
+            raise ValueError("--threshold-method manual requires --threshold.")
+        if threshold_percentile is not None:
+            raise ValueError("Use either --threshold or --threshold-percentile, not both.")
+        return float(threshold), "manual"
+
+    if method == "percentile":
+        if threshold is not None:
+            raise ValueError("Use either --threshold or --threshold-percentile, not both.")
+        if threshold_percentile is None:
+            raise ValueError("--threshold-method percentile requires --threshold-percentile.")
+        return float(np.percentile(finite, threshold_percentile)), f"p{threshold_percentile:g}"
+
+    if threshold is not None or threshold_percentile is not None:
+        raise ValueError("--threshold-method otsu chooses the threshold automatically; omit manual threshold args.")
+    return float(filters.threshold_otsu(finite)), "otsu"
 
 
-def write_slices(volume, outdir, stem, axes, low, high, threshold, threshold_percentile, overlay, count):
+def write_slices(volume, outdir, stem, axes, low, high, threshold, threshold_percentile, threshold_method, overlay, count):
     mask = None
     threshold_label = None
     if overlay:
-        threshold = threshold_value(volume, threshold, threshold_percentile)
-        threshold_label = f"thr {threshold:.2f}"
+        threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
+        threshold_label = f"{method_label}_thr_{threshold:.2f}"
         mask = volume > threshold
 
     for axis in axes:
@@ -150,14 +185,14 @@ def write_orthos(volume, outdir, stem, low, high):
     make_sheet(items, outdir / f"{stem}_orthos.png", cols=3)
 
 
-def write_mips(volume, outdir, stem, low, high, threshold, threshold_percentile, overlay):
+def write_mips(volume, outdir, stem, low, high, threshold, threshold_percentile, threshold_method, overlay):
     items = []
     overlay_items = []
     mask = None
     threshold_label = None
     if overlay:
-        threshold = threshold_value(volume, threshold, threshold_percentile)
-        threshold_label = f"thr {threshold:.2f}"
+        threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
+        threshold_label = f"{method_label}_thr_{threshold:.2f}"
         mask = volume > threshold
 
     for axis in ("z", "y", "x"):
@@ -174,7 +209,7 @@ def write_mips(volume, outdir, stem, low, high, threshold, threshold_percentile,
         make_sheet(overlay_items, outdir / f"{stem}_mips_overlay_{threshold_label.replace(' ', '_')}.png", cols=3)
 
 
-def write_histogram(volume, outdir, stem, threshold, threshold_percentile):
+def write_histogram(volume, outdir, stem, threshold, threshold_percentile, threshold_method):
     values = volume[np.isfinite(volume)].ravel()
     hist, edges = np.histogram(values, bins=256, range=(float(values.min()), float(values.max())))
     hist = np.log1p(hist)
@@ -194,10 +229,15 @@ def write_histogram(volume, outdir, stem, threshold, threshold_percentile):
         y1 = y0 - int(value / max_h * plot_h)
         draw.rectangle((x0, y1, max(x1, x0 + 1), y0), fill=(95, 103, 112))
 
-    threshold = threshold_value(volume, threshold, threshold_percentile)
+    threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
     x_thr = margin + int((threshold - edges[0]) / max(edges[-1] - edges[0], 1e-6) * plot_w)
     draw.line((x_thr, margin, x_thr, height - margin), fill=(230, 70, 30), width=3)
-    draw.text((margin, 12), f"{stem} intensity histogram, threshold={threshold:.2f}", fill=(36, 39, 42), font=font)
+    draw.text(
+        (margin, 12),
+        f"{stem} intensity histogram, threshold={threshold:.2f} ({method_label})",
+        fill=(36, 39, 42),
+        font=font,
+    )
     draw.text((margin, height - margin + 12), f"{edges[0]:.1f}", fill=(36, 39, 42), font=font)
     draw.text((width - margin - 60, height - margin + 12), f"{edges[-1]:.1f}", fill=(36, 39, 42), font=font)
 
@@ -206,8 +246,8 @@ def write_histogram(volume, outdir, stem, threshold, threshold_percentile):
     image.save(out_path)
 
 
-def write_summary(volume, outdir, stem, original_shape, offset, low, high, threshold, threshold_percentile):
-    threshold = threshold_value(volume, threshold, threshold_percentile)
+def write_summary(volume, outdir, stem, original_shape, offset, low, high, threshold, threshold_percentile, threshold_method):
+    threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
     lines = [
         f"stem: {stem}",
         f"original_shape_zyx: {tuple(original_shape)}",
@@ -219,6 +259,7 @@ def write_summary(volume, outdir, stem, original_shape, offset, low, high, thres
         f"contrast_low: {low:.3f}",
         f"contrast_high: {high:.3f}",
         f"overlay_threshold: {threshold:.3f}",
+        f"overlay_threshold_method: {method_label}",
     ]
     out_path = outdir / f"{stem}_summary.txt"
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -245,10 +286,33 @@ def preview_volume(path, args):
     overlay = not args.no_overlay
 
     write_orthos(volume, outdir, path.stem, low, high)
-    write_mips(volume, outdir, path.stem, low, high, args.threshold, args.threshold_percentile, overlay)
-    write_slices(volume, outdir, path.stem, axes, low, high, args.threshold, args.threshold_percentile, overlay, args.slices)
-    write_histogram(volume, outdir, path.stem, args.threshold, args.threshold_percentile)
-    write_summary(volume, outdir, path.stem, original_shape, offset, low, high, args.threshold, args.threshold_percentile)
+    write_mips(volume, outdir, path.stem, low, high, args.threshold, args.threshold_percentile, args.threshold_method, overlay)
+    write_slices(
+        volume,
+        outdir,
+        path.stem,
+        axes,
+        low,
+        high,
+        args.threshold,
+        args.threshold_percentile,
+        args.threshold_method,
+        overlay,
+        args.slices,
+    )
+    write_histogram(volume, outdir, path.stem, args.threshold, args.threshold_percentile, args.threshold_method)
+    write_summary(
+        volume,
+        outdir,
+        path.stem,
+        original_shape,
+        offset,
+        low,
+        high,
+        args.threshold,
+        args.threshold_percentile,
+        args.threshold_method,
+    )
     print(f"Saved previews for {path} in {outdir}")
 
 

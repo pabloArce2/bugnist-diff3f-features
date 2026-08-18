@@ -40,6 +40,15 @@ def parse_args():
         help="Coordinate order for fallback CSV parsing when columns are unnamed.",
     )
     parser.add_argument("--downsample", type=int, default=1, help="Stride downsampling factor.")
+    parser.add_argument(
+        "--threshold-method",
+        choices=("auto", "manual", "percentile", "otsu"),
+        default="auto",
+        help=(
+            "How to choose the segmentation threshold. "
+            "auto uses --threshold if supplied, then --threshold-percentile if supplied, otherwise Otsu."
+        ),
+    )
     parser.add_argument("--threshold", type=float, help="Manual intensity threshold.")
     parser.add_argument(
         "--threshold-percentile",
@@ -118,10 +127,44 @@ def crop_to_mask_bbox(volume, mask, padding_zyx):
     return volume[slices], start
 
 
+def resolve_threshold(volume, threshold, threshold_percentile, threshold_method):
+    finite = volume[np.isfinite(volume)]
+    if finite.size == 0:
+        raise ValueError("Input volume has no finite voxels.")
+
+    method = threshold_method
+    if method == "auto":
+        if threshold is not None:
+            method = "manual"
+        elif threshold_percentile is not None:
+            method = "percentile"
+        else:
+            method = "otsu"
+
+    if method == "manual":
+        if threshold is None:
+            raise ValueError("--threshold-method manual requires --threshold.")
+        if threshold_percentile is not None:
+            raise ValueError("Use either --threshold or --threshold-percentile, not both.")
+        return float(threshold), "manual"
+
+    if method == "percentile":
+        if threshold is not None:
+            raise ValueError("Use either --threshold or --threshold-percentile, not both.")
+        if threshold_percentile is None:
+            raise ValueError("--threshold-method percentile requires --threshold-percentile.")
+        return float(np.percentile(finite, threshold_percentile)), f"p{threshold_percentile:g}"
+
+    if threshold is not None or threshold_percentile is not None:
+        raise ValueError("--threshold-method otsu chooses the threshold automatically; omit manual threshold args.")
+    return float(filters.threshold_otsu(finite)), "otsu"
+
+
 def make_mask(
     volume,
     threshold,
     threshold_percentile,
+    threshold_method,
     invert,
     min_size,
     keep_largest,
@@ -129,16 +172,7 @@ def make_mask(
     closing_radius=0,
     fill_holes=False,
 ):
-    finite = volume[np.isfinite(volume)]
-    if finite.size == 0:
-        raise ValueError("Input volume has no finite voxels.")
-
-    if threshold is None:
-        threshold = (
-            np.percentile(finite, threshold_percentile)
-            if threshold_percentile is not None
-            else filters.threshold_otsu(finite)
-        )
+    threshold, threshold_label = resolve_threshold(volume, threshold, threshold_percentile, threshold_method)
 
     mask = volume < threshold if invert else volume > threshold
     if min_size > 0:
@@ -159,7 +193,7 @@ def make_mask(
         sizes[0] = 0
         mask = labels == sizes.argmax()
 
-    return mask
+    return mask, threshold, threshold_label
 
 
 def main():
@@ -190,13 +224,14 @@ def main():
             volume,
             args.threshold,
             args.threshold_percentile,
+            args.threshold_method,
             args.invert,
             args.min_size,
             args.keep_largest,
             args.opening_radius,
             args.closing_radius,
             args.fill_holes,
-        )
+        )[0]
         volume, auto_offset = crop_to_mask_bbox(volume, auto_mask, args.auto_crop_padding)
         offset = offset + auto_offset
 
@@ -206,10 +241,11 @@ def main():
         volume = volume[:: args.downsample, :: args.downsample, :: args.downsample]
         offset = offset / args.downsample
 
-    mask = make_mask(
+    mask, threshold, threshold_label = make_mask(
         volume,
         args.threshold,
         args.threshold_percentile,
+        args.threshold_method,
         args.invert,
         args.min_size,
         args.keep_largest,
@@ -229,6 +265,8 @@ def main():
     print(f"Saved {out_path}")
     print(f"Volume shape after crop/downsample: {volume.shape}")
     print(f"Volume offset before downsample: {tuple(int(v) for v in (offset * args.downsample))}")
+    print(f"Segmentation threshold: {threshold:.3f} ({threshold_label})")
+    print(f"Segmented voxels: {int(mask.sum())}")
     print(f"Mesh vertices: {len(mesh.vertices)}")
     print(f"Mesh faces: {len(mesh.faces)}")
 

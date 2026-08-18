@@ -23,6 +23,7 @@ Use these when you want to understand what the pipeline is doing.
 
 - [Diff3F Descriptors Explained](information/DIFF3F_DESCRIPTORS_EXPLAINED.md): what `.pt` files are, what the 2048-D vectors mean, and how descriptors attach to geometry.
 - [2D Debug Images Explained](information/DIFF3F_2D_DEBUG_IMAGES_EXPLAINED.md): what the render/depth/normal/AI/PCA debug images show.
+- [Otsu Thresholding Explained](information/OTSU_THRESHOLDING_EXPLAINED.md): what automatic Otsu segmentation is and when it helps or fails.
 
 ## Repository Map
 

@@ -22,6 +22,17 @@ python scripts\preview_tif_volume.py `
 
 The useful outputs are orthogonal slices, maximum intensity projections, histogram, threshold overlays, and summary text.
 
+Otsu automatic-threshold preview:
+
+```powershell
+python scripts\preview_tif_volume.py `
+  --tif bugNIST\raw\bcrick_10_001.tif `
+  --outdir previews\bugnist_raw_ct_otsu `
+  --roi-start 185 30 29 `
+  --roi-size 180 220 200 `
+  --threshold-method otsu
+```
+
 ## 2. Convert CT To Mesh
 
 Clean no-downsample `bcrick` example:
@@ -33,6 +44,19 @@ python scripts\bugnist_tif_to_mesh.py `
   --roi-start 185 30 29 `
   --roi-size 180 220 200 `
   --threshold 29 `
+  --keep-largest `
+  --downsample 1
+```
+
+Otsu mesh version using the same ROI:
+
+```powershell
+python scripts\bugnist_tif_to_mesh.py `
+  --tif bugNIST\raw\bcrick_10_001.tif `
+  --out meshes\bugnist_individual\bcrick_10_001\otsu\bcrick_10_001_otsu_roi_keeplargest_ds1.obj `
+  --roi-start 185 30 29 `
+  --roi-size 180 220 200 `
+  --threshold-method otsu `
   --keep-largest `
   --downsample 1
 ```
@@ -56,6 +80,23 @@ python scripts\bugnist_tif_to_pointcloud.py `
   --roi-start 185 30 29 `
   --roi-size 180 220 200 `
   --threshold 29 `
+  --keep-largest `
+  --downsample 1 `
+  --num-points 20000 `
+  --method mesh-surface `
+  --center
+```
+
+Otsu point-cloud version using the same ROI:
+
+```powershell
+python scripts\bugnist_tif_to_pointcloud.py `
+  --tif bugNIST\raw\bcrick_10_001.tif `
+  --out pointclouds\bugnist_individual\bcrick_10_001\otsu\bcrick_10_001_otsu_roi_keeplargest_ds1_20k.ply `
+  --npy pointclouds\bugnist_individual\bcrick_10_001\otsu\bcrick_10_001_otsu_roi_keeplargest_ds1_20k.npy `
+  --roi-start 185 30 29 `
+  --roi-size 180 220 200 `
+  --threshold-method otsu `
   --keep-largest `
   --downsample 1 `
   --num-points 20000 `
@@ -294,4 +335,3 @@ bjobs
 ```
 
 Do not run heavy Diff3F extraction on the login node. Submit through LSF.
-
