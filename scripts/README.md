@@ -24,6 +24,8 @@ transform_geometry.py        rotate, scale, or translate meshes and point clouds
 preview_mesh.py             quick mesh PNG previews
 preview_pointcloud.py       quick point-cloud PNG previews
 preview_geometry_points.py  point-render preview for either meshes or point clouds
+pointcloud_to_blender_splats.py convert colored points to tiny colored mesh splats for Blender
+pointcloud_to_html_viewer.py    create a standalone browser viewer for colored point clouds
 ```
 
 ## Diff3F Descriptor Extraction
