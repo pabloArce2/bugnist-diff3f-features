@@ -45,6 +45,7 @@ def parse_args():
     parser.add_argument("--eta", type=float, default=1.0)
     parser.add_argument("--fit-sample", type=int, default=12000, help="Pixels used to fit PCA feature colors.")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--render-only", action="store_true", help="Only save the selected 2D render view.")
     parser.add_argument("--skip-ai", action="store_true", help="Only save render/control images; do not run diffusion.")
     return parser.parse_args()
 
@@ -233,6 +234,30 @@ def make_contact_sheet(outdir, image_paths):
 
 
 def write_readme(outdir, args, saved_denoising_steps):
+    file_lines = [
+        "- `01_input_render.png`: the plain 2D render given to image-to-image Stable Diffusion.",
+    ]
+    if not args.render_only:
+        file_lines.extend(
+            [
+                "- `02_depth_control.png`: the depth ControlNet conditioning image.",
+                "- `03_normal_control.png`: the normal ControlNet conditioning image, if enabled.",
+                "- `04_visible_mask.png`: white pixels are geometry pixels; black pixels are background.",
+            ]
+        )
+    if not args.render_only and not args.skip_ai:
+        file_lines.extend(
+            [
+                "- `05_denoise_step_*.png`: decoded latent snapshots during Stable Diffusion denoising.",
+                "- `06_final_generated.png`: the final image produced by the 2D AI.",
+                "- `07_ai_change_map.png`: amplified pixel difference between the input render and final generated image.",
+                "- `08_unet_feature_pca.png`: PCA visualization of the 1280-D diffusion UNet feature map.",
+                "- `09_dino_feature_pca.png`: PCA visualization of the 768-D DINOv2 feature map.",
+                "- `10_combined_diff3f_feature_pca.png`: PCA visualization of the full 2048-D pixel descriptor.",
+            ]
+        )
+    file_lines.append("- `contact_sheet.png`: a compact visual summary.")
+
     lines = [
         "# Diff3F 2D View Debug",
         "",
@@ -240,17 +265,7 @@ def write_readme(outdir, args, saved_denoising_steps):
         "",
         "## Files",
         "",
-        "- `01_input_render.png`: the plain 2D render given to image-to-image Stable Diffusion.",
-        "- `02_depth_control.png`: the depth ControlNet conditioning image.",
-        "- `03_normal_control.png`: the normal ControlNet conditioning image, if enabled.",
-        "- `04_visible_mask.png`: white pixels are geometry pixels; black pixels are background.",
-        "- `05_denoise_step_*.png`: decoded latent snapshots during Stable Diffusion denoising.",
-        "- `06_final_generated.png`: the final image produced by the 2D AI.",
-        "- `07_ai_change_map.png`: amplified pixel difference between the input render and final generated image.",
-        "- `08_unet_feature_pca.png`: PCA visualization of the 1280-D diffusion UNet feature map.",
-        "- `09_dino_feature_pca.png`: PCA visualization of the 768-D DINOv2 feature map.",
-        "- `10_combined_diff3f_feature_pca.png`: PCA visualization of the full 2048-D pixel descriptor.",
-        "- `contact_sheet.png`: a compact visual summary.",
+        *file_lines,
         "",
         "## Run",
         "",
@@ -283,6 +298,12 @@ def main():
 
     input_render = image_from_float_rgb(view["render"].numpy())
     input_render.save(outdir / "01_input_render.png")
+
+    if args.render_only:
+        make_contact_sheet(outdir, [("input render", outdir / "01_input_render.png")])
+        write_readme(outdir, args, [])
+        print(f"Saved render-only debug image to {outdir}")
+        return
 
     depth_image = process_depth_map(view["depth"].clone())
     depth_image.save(outdir / "02_depth_control.png")

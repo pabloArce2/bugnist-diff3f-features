@@ -30,7 +30,7 @@ preview_geometry_points.py  point-render preview for either meshes or point clou
 ```text
 compute_mesh_features.py       compute Diff3F features for mesh vertices
 compute_pointcloud_features.py compute Diff3F features for point-cloud points
-debug_2d_diffusion_view.py     save the 2D render/control/AI/debug images for one view
+debug_2d_diffusion_view.py     save one 2D render, controls, AI trace, or feature debug images
 ```
 
 ## Feature Visualization

@@ -237,6 +237,21 @@ python scripts\inspect_feature_quality.py `
 
 ## 11. Debug One 2D Diffusion View
 
+Render-only camera check:
+
+```powershell
+python scripts\debug_2d_diffusion_view.py `
+  --kind mesh `
+  --input meshes\bugnist_individual\bcrick_10_001\preprocessed\bcrick_10_001_thr29_roi_keeplargest_ds1.obj `
+  --prompt insect `
+  --outdir debug\bcrick_view0_render_only `
+  --num-views 16 `
+  --view-index 0 `
+  --height 512 `
+  --width 512 `
+  --render-only
+```
+
 Render/control-only:
 
 ```powershell
