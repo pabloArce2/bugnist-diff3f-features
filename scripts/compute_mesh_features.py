@@ -1,5 +1,4 @@
 import argparse
-import math
 from pathlib import Path
 import sys
 
@@ -10,6 +9,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from dataloaders.mesh_container import MeshContainer
+from camera_sampling import VIEW_SAMPLINGS, validate_view_count
 from diff3f import get_features_per_vertex
 from diffusion import init_pipe
 from dino import init_dino
@@ -28,6 +28,12 @@ def parse_args():
     parser.add_argument("--outdir", default="output/hpc_features", help="Directory for .pt outputs.")
     parser.add_argument("--device", default=None, help="Torch device, e.g. cuda:0 or cpu.")
     parser.add_argument("--num-views", type=int, default=100)
+    parser.add_argument(
+        "--view-sampling",
+        choices=VIEW_SAMPLINGS,
+        default="grid",
+        help="Camera sampling strategy. grid is the original Diff3F behavior.",
+    )
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--tolerance", type=float, default=0.01)
@@ -47,9 +53,7 @@ def prompts_for_meshes(prompts, mesh_count):
 
 def main():
     args = parse_args()
-    view_grid = math.isqrt(args.num_views)
-    if view_grid * view_grid != args.num_views:
-        raise ValueError("--num-views must be a perfect square, e.g. 4, 9, 16, 25, or 100.")
+    validate_view_count(args.num_views, args.view_sampling)
 
     device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda":
@@ -60,6 +64,7 @@ def main():
     prompts = prompts_for_meshes(args.prompt, len(args.mesh))
 
     print(f"Using device: {device}")
+    print(f"View sampling: {args.view_sampling} ({args.num_views} views)")
     print(f"CUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name(device)}")
@@ -93,6 +98,7 @@ def main():
             W=args.width,
             tolerance=args.tolerance,
             use_normal_map=not args.no_normal_map,
+            view_sampling=args.view_sampling,
         )
         torch.save(features, save_path)
         print(f"Saved {save_path}")

@@ -360,6 +360,7 @@ If many points are missing, try:
 
 ```text
 more views:        --num-views 9, 16, 25
+better cameras:    --view-sampling insect or --view-sampling fibonacci
 higher resolution: --height 512 --width 512
 larger point size: --point-radius 0.012 or 0.015
 ```
@@ -375,18 +376,25 @@ side view sees side structures
 top view sees dorsal structure
 ```
 
-Diff3F uses a grid of camera views around the object.
+Diff3F uses several rendered camera views around the object. The original
+renderer used a square elevation/azimuth grid. Our BugNIST scripts now also
+support better view samplers.
 
 Important:
 
 ```text
---num-views must be a perfect square
+--view-sampling grid preserves the original Diff3F behavior
+--view-sampling grid requires --num-views to be a perfect square
 
 4   = 2 x 2 view grid
 9   = 3 x 3 view grid
 16  = 4 x 4 view grid
 25  = 5 x 5 view grid
 100 = 10 x 10 view grid
+
+--view-sampling fibonacci spreads cameras over the sphere
+--view-sampling insect favors side and oblique views for insect bodies
+fibonacci and insect accept arbitrary view counts such as 16, 25, 34, or 50
 ```
 
 More views usually means better coverage, but also more GPU time.
@@ -817,4 +825,3 @@ We are building a rendering-based pipeline that uses pretrained image models to
 assign a 2048-dimensional learned descriptor to every mesh vertex or point-cloud
 point, so that insect surfaces can be visualized and compared by feature
 similarity rather than by raw coordinates alone.
-

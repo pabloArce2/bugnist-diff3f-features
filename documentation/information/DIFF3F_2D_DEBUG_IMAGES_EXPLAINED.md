@@ -702,6 +702,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\pointcloud_bcrick_view0_controls `
   --num-views 4 `
+  --view-sampling insect `
   --view-index 0 `
   --height 128 `
   --width 128 `
@@ -717,6 +718,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\pointcloud_bcrick_view0_ai `
   --num-views 4 `
+  --view-sampling insect `
   --view-index 0 `
   --height 128 `
   --width 128 `
@@ -733,6 +735,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\mesh_bcrick_view0_ai `
   --num-views 4 `
+  --view-sampling insect `
   --view-index 0 `
   --height 128 `
   --width 128 `
@@ -811,4 +814,3 @@ The debug images show how one 3D view becomes a 2D AI interpretation, how that
 interpretation produces diffusion and DINO feature maps, and how those maps
 become the 2048-dimensional descriptors that are later attached back onto the
 3D insect.
-

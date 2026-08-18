@@ -112,6 +112,7 @@ def get_features_per_vertex(
     return_image=True,
     bq=True,
     prompts_list=None,
+    view_sampling="grid",
 ):
     t1 = time()
     if mesh_vertices is None:
@@ -123,7 +124,14 @@ def get_features_per_vertex(
         maximal_distance = torch.cdist(mesh_vertices, mesh_vertices).max()  # .cpu()
     ball_drop_radius = maximal_distance * tolerance
     batched_renderings, normal_batched_renderings, camera, depth = batch_render(
-        device, mesh, mesh.verts_list()[0], num_views, H, W, use_normal_map
+        device,
+        mesh,
+        mesh.verts_list()[0],
+        num_views,
+        H,
+        W,
+        use_normal_map,
+        view_sampling=view_sampling,
     )
     print("Rendering complete")
     if use_normal_map:
@@ -235,6 +243,7 @@ def get_features_per_point_cloud(
     num_images_per_prompt=1,
     return_image=True,
     prompts_list=None,
+    view_sampling="grid",
 ):
     t1 = time()
     points = points.to(device=device, dtype=torch.float32)
@@ -252,6 +261,7 @@ def get_features_per_point_cloud(
         return_point_indices=True,
         point_radius=point_radius,
         points_per_pixel=points_per_pixel,
+        view_sampling=view_sampling,
     )
     print("Point cloud rendering complete")
 

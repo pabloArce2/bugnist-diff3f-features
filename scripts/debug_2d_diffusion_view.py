@@ -14,6 +14,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from dataloaders.mesh_container import MeshContainer
+from camera_sampling import VIEW_SAMPLINGS, validate_view_count
 from diff3f import arange_pixels
 from diffusion import init_pipe, process_depth_map, rgb2normalmap
 from dino import get_dino_features, init_dino
@@ -32,6 +33,12 @@ def parse_args():
     parser.add_argument("--outdir", default="debug/diff3f_2d_view")
     parser.add_argument("--device", default=None)
     parser.add_argument("--num-views", type=int, default=4)
+    parser.add_argument(
+        "--view-sampling",
+        choices=VIEW_SAMPLINGS,
+        default="grid",
+        help="Camera sampling strategy. grid is the original Diff3F behavior.",
+    )
     parser.add_argument("--view-index", type=int, default=0)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
@@ -49,12 +56,6 @@ def parse_args():
     parser.add_argument("--render-only", action="store_true", help="Only save the selected 2D render view.")
     parser.add_argument("--skip-ai", action="store_true", help="Only save render/control images; do not run diffusion.")
     return parser.parse_args()
-
-
-def ensure_square_views(num_views):
-    view_grid = math.isqrt(num_views)
-    if view_grid * view_grid != num_views:
-        raise ValueError("--num-views must be a perfect square, e.g. 4, 9, 16, 25, or 100.")
 
 
 def image_from_float_rgb(rgb):
@@ -99,6 +100,7 @@ def render_debug_view(args, device, use_normal_map):
             args.height,
             args.width,
             use_normal_map=use_normal_map,
+            view_sampling=args.view_sampling,
         )
         point_indices = None
     else:
@@ -114,10 +116,8 @@ def render_debug_view(args, device, use_normal_map):
             return_point_indices=True,
             point_radius=args.point_radius,
             points_per_pixel=args.points_per_pixel,
+            view_sampling=args.view_sampling,
         )
-
-    if args.view_index < 0 or args.view_index >= args.num_views:
-        raise ValueError(f"--view-index must be between 0 and {args.num_views - 1}.")
 
     rendered = rendered.cpu()
     depth = depth.cpu()
@@ -130,6 +130,9 @@ def render_debug_view(args, device, use_normal_map):
         return {
             "renders": rendered[:, :, :, :3],
         }
+
+    if args.view_index < 0 or args.view_index >= args.num_views:
+        raise ValueError(f"--view-index must be between 0 and {args.num_views - 1}.")
 
     view = {
         "render": rendered[args.view_index, :, :, :3],
@@ -303,7 +306,7 @@ def write_readme(outdir, args, saved_denoising_steps):
 
 def main():
     args = parse_args()
-    ensure_square_views(args.num_views)
+    validate_view_count(args.num_views, args.view_sampling)
     if args.all_views and not args.render_only:
         raise ValueError("--all-views is only supported together with --render-only.")
 
@@ -316,6 +319,7 @@ def main():
     use_normal_map = False if args.render_only else not args.no_normal_map
 
     print(f"Using device: {device}")
+    print(f"View sampling: {args.view_sampling} ({args.num_views} views)")
     if args.all_views:
         print(f"Rendering all {args.num_views} {args.kind} views")
     else:

@@ -150,6 +150,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\bcrick_rot_x90_all_16_renders `
   --num-views 16 `
+  --view-sampling insect `
   --height 512 `
   --width 512 `
   --render-only `
@@ -164,8 +165,9 @@ Local smoke test:
 python scripts\compute_mesh_features.py `
   --mesh meshes\bugnist_individual\sfaar_10_001\preprocessed\sfaar_10_001_thr11_roi_keeplargest_ds1.obj `
   --prompt "insect" `
-  --outdir output\bugnist_clean_features `
+  --outdir output\bugnist_clean_features_insect_views `
   --num-views 4 `
+  --view-sampling insect `
   --height 256 `
   --width 256 `
   --tolerance 0.004
@@ -177,14 +179,17 @@ Higher-quality local/HPC run:
 python scripts\compute_mesh_features.py `
   --mesh meshes\bugnist_individual\sfaar_10_001\preprocessed\sfaar_10_001_thr11_roi_keeplargest_ds1.obj `
   --prompt "insect" `
-  --outdir output\bugnist_clean_features_hq_16v_512 `
+  --outdir output\bugnist_clean_features_hq_16v_512_insect_views `
   --num-views 16 `
+  --view-sampling insect `
   --height 512 `
   --width 512 `
   --tolerance 0.008
 ```
 
-`--num-views` must be a perfect square: `4`, `9`, `16`, `25`, `100`.
+`--view-sampling grid` preserves the original Diff3F camera grid and requires a square number of views: `4`, `9`, `16`, `25`, `100`. For BugNIST insects, prefer `--view-sampling insect` or `--view-sampling fibonacci`; those accept any positive number of views, including `16`, `25`, `34`, and `50`.
+
+Use a new `--outdir` when changing `--view-sampling`, because the `.pt` filename is still based on the mesh name.
 
 ## 6. Compute Point-Cloud Diff3F Features
 
@@ -192,8 +197,9 @@ python scripts\compute_mesh_features.py `
 python scripts\compute_pointcloud_features.py `
   --pointcloud pointclouds\bugnist_individual\bcrick_10_001\preprocessed\bcrick_10_001_thr29_roi_keeplargest_ds1_20k.ply `
   --prompt "insect" `
-  --outdir output\bugnist_pointcloud_features `
+  --outdir output\bugnist_pointcloud_features_insect_views `
   --num-views 4 `
+  --view-sampling insect `
   --height 256 `
   --width 256 `
   --point-radius 0.012
@@ -271,6 +277,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\bcrick_view0_render_only `
   --num-views 16 `
+  --view-sampling insect `
   --view-index 0 `
   --height 512 `
   --width 512 `
@@ -286,6 +293,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\bcrick_all_16_renders `
   --num-views 16 `
+  --view-sampling insect `
   --height 512 `
   --width 512 `
   --render-only `
@@ -301,6 +309,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\pointcloud_bcrick_view0_controls `
   --num-views 4 `
+  --view-sampling insect `
   --view-index 0 `
   --height 128 `
   --width 128 `
@@ -316,6 +325,7 @@ python scripts\debug_2d_diffusion_view.py `
   --prompt insect `
   --outdir debug\pointcloud_bcrick_view0_ai `
   --num-views 4 `
+  --view-sampling insect `
   --view-index 0 `
   --height 128 `
   --width 128 `

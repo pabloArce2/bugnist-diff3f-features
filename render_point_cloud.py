@@ -1,5 +1,3 @@
-import math
-
 import torch
 from pytorch3d.renderer import (
     PerspectiveCameras,
@@ -8,6 +6,8 @@ from pytorch3d.renderer import (
     look_at_view_transform,
 )
 from pytorch3d.structures import Pointclouds
+
+from camera_sampling import get_view_angles
 
 
 def depth_to_render_images(raw_depth):
@@ -87,6 +87,7 @@ def run_rendering(
     return_point_indices=False,
     point_radius=0.01,
     points_per_pixel=1,
+    view_sampling="grid",
 ):
     points = points.to(device=device, dtype=torch.float32)
     features = torch.ones_like(points, device=device, dtype=torch.float32) * 0.8
@@ -99,11 +100,13 @@ def run_rendering(
     scaling_factor = 0.65
     distance = torch.sqrt((bb_diff * bb_diff).sum())
     distance *= scaling_factor
-    steps = int(math.sqrt(num_views))
-    end = 360 - 360 / steps
-    elevation = torch.linspace(start=0, end=end, steps=steps, device=device).repeat(steps) + add_angle_ele
-    azimuth = torch.linspace(start=0, end=end, steps=steps, device=device)
-    azimuth = torch.repeat_interleave(azimuth, steps) + add_angle_azi
+    azimuth, elevation = get_view_angles(
+        num_views,
+        device,
+        view_sampling=view_sampling,
+        add_angle_azi=add_angle_azi,
+        add_angle_ele=add_angle_ele,
+    )
     bbox_center = bbox_center.unsqueeze(0)
     rotation, translation = look_at_view_transform(
         dist=distance, azim=azimuth, elev=elevation, device=device, at=bbox_center
@@ -154,6 +157,7 @@ def batch_render(
     return_point_indices=False,
     point_radius=0.01,
     points_per_pixel=1,
+    view_sampling="grid",
 ):
     trials = 0
     add_angle_azi = 0
@@ -173,6 +177,7 @@ def batch_render(
                 return_point_indices=return_point_indices,
                 point_radius=point_radius,
                 points_per_pixel=points_per_pixel,
+                view_sampling=view_sampling,
             )
         except torch.linalg.LinAlgError:
             trials += 1
