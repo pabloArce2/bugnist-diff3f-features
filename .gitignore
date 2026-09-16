@@ -166,6 +166,8 @@ logs/
 # Generated geometry and descriptor files
 meshes/bugnist/
 meshes/bugnist_individual/
+meshes/bugnist_crickets/
+meshes/Bugnist_long/
 *.pt
 *.pth
 *.blend

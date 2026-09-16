@@ -11,6 +11,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from camera_sampling import VIEW_SAMPLINGS, validate_view_count
+from descriptor_debug_capture import DescriptorDebugWriter, create_debug_run_directory, parse_debug_views
 from diff3f import get_features_per_point_cloud
 from diffusion import init_pipe
 from dino import init_dino
@@ -38,6 +39,16 @@ def parse_args():
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--point-radius", type=float, default=0.01, help="PyTorch3D point radius in NDC units.")
     parser.add_argument("--points-per-pixel", type=int, default=1)
+    parser.add_argument(
+        "--debug-outdir",
+        default=None,
+        help="Capture the exact per-view images used by this descriptor under a new run folder.",
+    )
+    parser.add_argument(
+        "--debug-views",
+        default="all",
+        help="Views to capture: 'all', indices such as '0 4 8', or ranges such as '0-3'.",
+    )
     parser.add_argument("--no-normal-map", action="store_true", help="Use only depth ControlNet.")
     parser.add_argument("--skip-existing", action="store_true", help="Do not recompute existing outputs.")
     return parser.parse_args()
@@ -75,6 +86,8 @@ def load_points(path):
 def main():
     args = parse_args()
     validate_view_count(args.num_views, args.view_sampling)
+    if args.debug_outdir:
+        parse_debug_views(args.debug_views, args.num_views)
 
     device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda":
@@ -93,33 +106,67 @@ def main():
 
     pipe = init_pipe(device, use_normal_map=use_normal_map)
     dino_model = init_dino(device)
+    debug_run_dir = None
+    if args.debug_outdir:
+        debug_run_dir = create_debug_run_directory(args.debug_outdir, "pointcloud")
+        print(f"Capturing exact descriptor-run images in {debug_run_dir}")
+        if args.skip_existing:
+            print("Ignoring --skip-existing because image capture requires a fresh descriptor run.")
 
-    for pointcloud_path, prompt in zip(args.pointcloud, prompts):
+    for pointcloud_index, (pointcloud_path, prompt) in enumerate(zip(args.pointcloud, prompts)):
         pointcloud_path = Path(pointcloud_path)
         save_path = outdir / f"{pointcloud_path.stem}_diff3f.pt"
-        if args.skip_existing and save_path.exists():
+        if args.skip_existing and not args.debug_outdir and save_path.exists():
             print(f"Skipping existing output: {save_path}")
             continue
 
         print(f"Processing {pointcloud_path} with prompt {prompt!r}")
         points = load_points(pointcloud_path)
-        features = get_features_per_point_cloud(
-            device=device,
-            pipe=pipe,
-            dino_model=dino_model,
-            points=points,
-            prompt=prompt,
-            num_views=args.num_views,
-            H=args.height,
-            W=args.width,
-            point_radius=args.point_radius,
-            points_per_pixel=args.points_per_pixel,
-            use_normal_map=use_normal_map,
-            view_sampling=args.view_sampling,
-        )
-        torch.save(features, save_path)
-        print(f"Saved {save_path}")
-        print(f"Feature tensor shape: {tuple(features.shape)}")
+        debug_writer = None
+        if debug_run_dir is not None:
+            debug_writer = DescriptorDebugWriter(
+                run_dir=debug_run_dir,
+                asset_index=pointcloud_index,
+                kind="pointcloud",
+                input_path=pointcloud_path,
+                descriptor_path=save_path,
+                prompt=prompt,
+                num_views=args.num_views,
+                view_sampling=args.view_sampling,
+                image_size=(args.height, args.width),
+                selected_views=args.debug_views,
+                mode="full",
+                extra_settings={
+                    "normalMap": use_normal_map,
+                    "pointRadius": args.point_radius,
+                    "pointsPerPixel": args.points_per_pixel,
+                },
+            )
+        try:
+            features = get_features_per_point_cloud(
+                device=device,
+                pipe=pipe,
+                dino_model=dino_model,
+                points=points,
+                prompt=prompt,
+                num_views=args.num_views,
+                H=args.height,
+                W=args.width,
+                point_radius=args.point_radius,
+                points_per_pixel=args.points_per_pixel,
+                use_normal_map=use_normal_map,
+                view_sampling=args.view_sampling,
+                view_observer=debug_writer,
+            )
+            torch.save(features, save_path)
+            if debug_writer is not None:
+                debug_writer.complete(features.shape)
+            print(f"Saved {save_path}")
+            print(f"Feature tensor shape: {tuple(features.shape)}")
+        except Exception as error:
+            if debug_writer is not None:
+                debug_writer.fail(error)
+            raise
 
 
 if __name__ == "__main__":

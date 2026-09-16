@@ -469,6 +469,40 @@ If two points have similar colors in a shared-PCA visualization, it suggests
 their descriptors are similar along the main PCA directions. But the real
 matching still happens in the full 2048-D space.
 
+## What Do PC1, PC2, PC3 Actually Mean?
+
+PCA does not measure anything chosen in advance, like "size" or "redness." It
+looks at all the sampled 2048-D descriptors and finds the directions along
+which those vectors vary the most:
+
+```text
+PC1 = the single direction of biggest variation across all sampled vertices
+PC2 = the direction of the next-biggest variation, at a right angle to PC1
+PC3 = the third-biggest, at a right angle to both PC1 and PC2
+```
+
+Every vertex's 2048 numbers get collapsed down to just 3 numbers: how far
+along PC1, PC2, and PC3 that vertex sits. Those 3 numbers are exactly what
+becomes the R, G, B color in the continuous shared-PCA `.ply` files.
+
+`scripts/plot_pca_kmeans_scatter.py` plots those same 3 numbers directly as
+points instead of as mesh colors. A 3-D scatter plot is hard to draw on a
+flat screen, so it shows three flat views of the same cloud instead, the
+same way you might look at one object from the front, the side, and the top:
+
+```text
+"PC1 vs PC2" panel: x = PC1, y = PC2, PC3 is ignored for this panel
+"PC1 vs PC3" panel: x = PC1, y = PC3, PC2 is ignored for this panel
+"PC2 vs PC3" panel: x = PC2, y = PC3, PC1 is ignored for this panel
+```
+
+Two points landing close together in one panel means their descriptors are
+similar along those two particular directions, not necessarily overall,
+since the third direction is invisible in that view. A pair of clusters that
+looks like it overlaps in one panel can look clearly separated in another,
+because the panels are cross-sections of the same 3-D cloud, not independent
+measurements.
+
 ## Single PCA Vs Shared PCA
 
 Single-shape PCA:

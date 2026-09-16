@@ -10,6 +10,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from dataloaders.mesh_container import MeshContainer
 from camera_sampling import VIEW_SAMPLINGS, validate_view_count
+from descriptor_debug_capture import DescriptorDebugWriter, create_debug_run_directory, parse_debug_views
 from diff3f import get_features_per_vertex
 from diffusion import init_pipe
 from dino import init_dino
@@ -38,6 +39,16 @@ def parse_args():
     parser.add_argument("--width", type=int, default=512)
     parser.add_argument("--tolerance", type=float, default=0.01)
     parser.add_argument("--tosca", action="store_true", help="Scale meshes as TOSCA meshes.")
+    parser.add_argument(
+        "--debug-outdir",
+        default=None,
+        help="Capture the exact per-view images used by this descriptor under a new run folder.",
+    )
+    parser.add_argument(
+        "--debug-views",
+        default="all",
+        help="Views to capture: 'all', indices such as '0 4 8', or ranges such as '0-3'.",
+    )
     parser.add_argument("--no-normal-map", action="store_true", help="Disable normal-map ControlNet input.")
     parser.add_argument("--skip-existing", action="store_true", help="Do not recompute existing outputs.")
     return parser.parse_args()
@@ -54,6 +65,8 @@ def prompts_for_meshes(prompts, mesh_count):
 def main():
     args = parse_args()
     validate_view_count(args.num_views, args.view_sampling)
+    if args.debug_outdir:
+        parse_debug_views(args.debug_views, args.num_views)
 
     device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
     if device.type == "cuda":
@@ -71,11 +84,17 @@ def main():
 
     pipe = init_pipe(device, use_normal_map=not args.no_normal_map)
     dino_model = init_dino(device)
+    debug_run_dir = None
+    if args.debug_outdir:
+        debug_run_dir = create_debug_run_directory(args.debug_outdir, "mesh")
+        print(f"Capturing exact descriptor-run images in {debug_run_dir}")
+        if args.skip_existing:
+            print("Ignoring --skip-existing because image capture requires a fresh descriptor run.")
 
-    for mesh_path, prompt in zip(args.mesh, prompts):
+    for mesh_index, (mesh_path, prompt) in enumerate(zip(args.mesh, prompts)):
         mesh_path = Path(mesh_path)
         save_path = outdir / f"{mesh_path.stem}_diff3f.pt"
-        if args.skip_existing and save_path.exists():
+        if args.skip_existing and not args.debug_outdir and save_path.exists():
             print(f"Skipping existing output: {save_path}")
             continue
 
@@ -86,22 +105,50 @@ def main():
             device=device,
             is_tosca=args.tosca,
         )
-        features = get_features_per_vertex(
-            device=device,
-            pipe=pipe,
-            dino_model=dino_model,
-            mesh=mesh,
-            prompt=prompt,
-            mesh_vertices=mesh.verts_list()[0],
-            num_views=args.num_views,
-            H=args.height,
-            W=args.width,
-            tolerance=args.tolerance,
-            use_normal_map=not args.no_normal_map,
-            view_sampling=args.view_sampling,
-        )
-        torch.save(features, save_path)
-        print(f"Saved {save_path}")
+        debug_writer = None
+        if debug_run_dir is not None:
+            debug_writer = DescriptorDebugWriter(
+                run_dir=debug_run_dir,
+                asset_index=mesh_index,
+                kind="mesh",
+                input_path=mesh_path,
+                descriptor_path=save_path,
+                prompt=prompt,
+                num_views=args.num_views,
+                view_sampling=args.view_sampling,
+                image_size=(args.height, args.width),
+                selected_views=args.debug_views,
+                mode="full",
+                extra_settings={
+                    "normalMap": not args.no_normal_map,
+                    "tolerance": args.tolerance,
+                    "toscaScaling": args.tosca,
+                },
+            )
+        try:
+            features = get_features_per_vertex(
+                device=device,
+                pipe=pipe,
+                dino_model=dino_model,
+                mesh=mesh,
+                prompt=prompt,
+                mesh_vertices=mesh.verts_list()[0],
+                num_views=args.num_views,
+                H=args.height,
+                W=args.width,
+                tolerance=args.tolerance,
+                use_normal_map=not args.no_normal_map,
+                view_sampling=args.view_sampling,
+                view_observer=debug_writer,
+            )
+            torch.save(features, save_path)
+            if debug_writer is not None:
+                debug_writer.complete(features.shape)
+            print(f"Saved {save_path}")
+        except Exception as error:
+            if debug_writer is not None:
+                debug_writer.fail(error)
+            raise
 
 
 if __name__ == "__main__":

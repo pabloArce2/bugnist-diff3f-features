@@ -113,6 +113,7 @@ def get_features_per_vertex(
     bq=True,
     prompts_list=None,
     view_sampling="grid",
+    view_observer=None,
 ):
     t1 = time()
     if mesh_vertices is None:
@@ -213,6 +214,17 @@ def get_features_per_vertex(
             ft_per_vertex[closest_vertex_indices] += features_per_pixel.T
             ft_per_vertex_count[closest_vertex_indices] += 1
 
+        if view_observer is not None and view_observer.wants_view(idx):
+            view_observer.capture_view(
+                view_index=idx,
+                input_image=diffusion_input_img,
+                depth_map=depth[idx, :, :, 0].unsqueeze(0),
+                normal_map=normal_map_input,
+                visible_mask=indices.reshape(H, W),
+                generated_image=diffusion_output[1][0],
+                prompt=prompt,
+            )
+
     idxs = (ft_per_vertex_count != 0)[:, 0]
     ft_per_vertex[idxs, :] = ft_per_vertex[idxs, :] / ft_per_vertex_count[idxs, :]
     missing_features = len(ft_per_vertex_count[ft_per_vertex_count == 0])
@@ -244,6 +256,7 @@ def get_features_per_point_cloud(
     return_image=True,
     prompts_list=None,
     view_sampling="grid",
+    view_observer=None,
 ):
     t1 = time()
     points = points.to(device=device, dtype=torch.float32)
@@ -324,6 +337,17 @@ def get_features_per_point_cloud(
             visible_point_indices,
             torch.ones((len(visible_point_indices), 1), dtype=ft_per_point_count.dtype),
         )
+
+        if view_observer is not None and view_observer.wants_view(idx):
+            view_observer.capture_view(
+                view_index=idx,
+                input_image=diffusion_input_img,
+                depth_map=depth[idx, :, :, 0].unsqueeze(0),
+                normal_map=normal_map_input,
+                visible_mask=(repeat > 0).reshape(H, W),
+                generated_image=diffusion_output[1][0],
+                prompt=prompt,
+            )
 
     idxs = (ft_per_point_count != 0)[:, 0]
     ft_per_point[idxs, :] = ft_per_point[idxs, :] / ft_per_point_count[idxs, :]

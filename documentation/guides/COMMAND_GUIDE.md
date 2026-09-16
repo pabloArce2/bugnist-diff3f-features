@@ -157,6 +157,38 @@ python scripts\debug_2d_diffusion_view.py `
   --all-views
 ```
 
+Smooth and simplify a CT-derived mesh:
+
+```powershell
+python scripts\smooth_simplify_mesh.py `
+  --input meshes\bugnist_individual\bcrick_10_001\preprocessed\bcrick_10_001_thr29_roi_keeplargest_ds1.obj `
+  --out meshes\bugnist_individual\bcrick_10_001\smoothed\bcrick_10_001_thr29_smooth10_cluster50k.obj `
+  --smooth-method taubin `
+  --smooth-iterations 10 `
+  --target-faces 50000 `
+  --decimate-method cluster `
+  --cluster-iterations 14 `
+  --final-smooth-iterations 3
+```
+
+`--decimate-method cluster` works without extra dependencies, but the final face count is approximate. If Open3D is installed, `--decimate-method quadric` usually preserves shape better.
+
+Inspect the smoothed/simplified mesh before computing descriptors:
+
+```powershell
+python scripts\debug_2d_diffusion_view.py `
+  --kind mesh `
+  --input meshes\bugnist_individual\bcrick_10_001\smoothed\bcrick_10_001_thr29_smooth10_cluster50k.obj `
+  --prompt insect `
+  --outdir debug\bcrick_smooth10_cluster50k_all_16_renders `
+  --num-views 16 `
+  --view-sampling insect `
+  --height 512 `
+  --width 512 `
+  --render-only `
+  --all-views
+```
+
 ## 5. Compute Mesh Diff3F Features
 
 Local smoke test:
@@ -187,6 +219,36 @@ python scripts\compute_mesh_features.py `
   --tolerance 0.008
 ```
 
+Descriptor extraction and exact per-view images in the same run (small camel test):
+
+```powershell
+python scripts\compute_mesh_features.py `
+  --mesh meshes\camel.obj `
+  --prompt "camel, full body, detailed animal" `
+  --outdir output\camel_features_debug_4v_256 `
+  --num-views 4 `
+  --view-sampling grid `
+  --height 256 `
+  --width 256 `
+  --tolerance 0.004 `
+  --tosca `
+  --debug-outdir debug\descriptor_runs\camel `
+  --debug-views all
+```
+
+This is one descriptor run, not a descriptor run followed by the standalone debugger. For each selected view it saves the exact generated image consumed by DINO, together with the input render, depth control, optional normal control, visibility mask, and AI change map. It also writes a generated-image contact sheet and a JSON manifest linking the images to the resulting descriptor.
+
+The outputs are placed under:
+
+```text
+output\camel_features_debug_4v_256\camel_diff3f.pt
+debug\descriptor_runs\camel\mesh_<timestamp>\00_camel\
+```
+
+Use `--debug-views 0` for only the first view, `--debug-views "0 4 8"` for selected views, or a range such as `--debug-views 0-3`. Image capture always recomputes the descriptor, even if `--skip-existing` is supplied, so that the images and `.pt` file come from the same execution.
+
+For a higher-quality camel run, change to `--num-views 16`, `--height 512`, `--width 512`, and a new output folder.
+
 `--view-sampling grid` preserves the original Diff3F camera grid and requires a square number of views: `4`, `9`, `16`, `25`, `100`. For BugNIST insects, prefer `--view-sampling insect` or `--view-sampling fibonacci`; those accept any positive number of views, including `16`, `25`, `34`, and `50`.
 
 Use a new `--outdir` when changing `--view-sampling`, because the `.pt` filename is still based on the mesh name.
@@ -205,7 +267,32 @@ python scripts\compute_pointcloud_features.py `
   --point-radius 0.012
 ```
 
+The point-cloud command supports the same combined capture flags:
+
+```powershell
+  --debug-outdir debug\descriptor_runs\pointcloud `
+  --debug-views all
+```
+
 ## 7. Visualize One Feature File
+
+The descriptor is stored in `.pt`; a colored `.ply` combines the original
+geometry with an RGB visualization of those features. This is a quick CPU-only
+post-process and does not run diffusion again.
+
+Camel descriptor as colored PLY and PNG:
+
+```powershell
+python scripts\visualize_mesh_features.py `
+  --mesh meshes\camel.obj `
+  --features output\camel_features_debug_4v_256\camel_diff3f.pt `
+  --out visualizations\camel_features_debug_4v_256\camel_diff3f_pca.ply `
+  --preview visualizations\camel_features_debug_4v_256\camel_diff3f_pca.png
+```
+
+The `.ply` stores the camel mesh and PCA-derived vertex RGB. The full 2,048-D
+descriptor remains in `camel_diff3f.pt`. The geometry must be the exact file
+used to create the descriptor because feature row `i` colors geometry row `i`.
 
 Mesh descriptor as colored PLY and PNG:
 
@@ -238,6 +325,10 @@ python scripts\visualize_feature_comparison.py `
   --outdir visualizations\bugnist_clean_features_hq_16v_512\shared_pca_bcrick_sfaar
 ```
 
+Add `--kmeans K --preview` to also export a discrete K-cluster color map (and
+PNG previews) sharing the same PCA basis. Full reference:
+`documentation/guides/PCA_KMEANS_CLUSTERING.md`.
+
 ## 9. Visualize Multiple Point Clouds With Shared PCA
 
 ```powershell
@@ -246,6 +337,8 @@ python scripts\visualize_pointcloud_feature_comparison.py `
   --item sfaar pointclouds\bugnist_individual\sfaar_10_001\preprocessed\sfaar_10_001_thr11_roi_keeplargest_ds1_20k.ply output\bugnist_pointcloud_features\sfaar_10_001_thr11_roi_keeplargest_ds1_20k_diff3f.pt `
   --outdir visualizations\bugnist_pointcloud_features\shared_pca_bcrick_sfaar
 ```
+
+Same `--kmeans K --preview` option is available here too.
 
 ## 10. Inspect Feature Quality
 

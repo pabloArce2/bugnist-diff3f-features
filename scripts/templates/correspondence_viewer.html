@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+  :root { color-scheme: light; --ink: #22303c; --muted: #647383; --line: #dce3e8; --accent: #087f8c; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: var(--ink); background: #f3f5f6; font: 13px/1.5 system-ui, sans-serif; }
+  #app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; height: 100dvh; }
+  aside { background: #fff; border-right: 1px solid var(--line); overflow-y: auto; padding: 22px 20px; }
+  h1 { font-size: 19px; letter-spacing: -.5px; line-height: 1.3; margin: 0 0 8px; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; margin: 0 0 12px; color: var(--muted); }
+  p { margin: 8px 0; }
+  .eyebrow { font-size: 10px; letter-spacing: 1.5px; color: var(--accent); font-weight: 700; margin-bottom: 7px; }
+  .muted { color: var(--muted); font-size: 12px; }
+  .section { padding-top: 18px; margin-top: 18px; border-top: 1px solid var(--line); }
+  label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 9px 0; }
+  label.check { justify-content: flex-start; }
+  input[type=checkbox] { accent-color: var(--accent); margin: 0 2px 0 0; }
+  input[type=range] { width: 130px; accent-color: var(--accent); }
+  select, button, input[type=number] { border: 1px solid #ccd6de; border-radius: 6px; padding: 7px 9px; background: #fff; color: var(--ink); font: inherit; }
+  select { width: 100%; }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); background: #eef8f8; }
+  button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, select:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .buttons > * { flex: 1; }
+  .legend { display: grid; gap: 6px; font-size: 12px; }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }
+  .source { background: #2584db; } .prediction { background: #e4742e; } .manual { background: #25955b; }
+  .line-swatch { display: inline-block; width: 20px; border-top: 2px solid #168996; margin-right: 7px; vertical-align: middle; }
+  .error-swatch { border-color: #d94859; border-top-style: dashed; }
+  dl { margin: 9px 0; display: grid; grid-template-columns: 1fr auto; gap: 5px 8px; font-size: 12px; }
+  dt { color: var(--muted); } dd { margin: 0; text-align: right; overflow-wrap: anywhere; max-width: 174px; }
+  .coords { font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+  #selection-title { font-size: 14px; margin: 6px 0; }
+  #selection-json { width: 100%; min-height: 100px; border: 1px solid var(--line); border-radius: 5px; font-size: 10px; resize: vertical; padding: 8px; }
+  details { margin-top: 10px; } summary { cursor: pointer; color: var(--muted); }
+  #stage { position: relative; overflow: hidden; min-width: 0; touch-action: none; }
+  #scene, #overlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #overlay { cursor: grab; touch-action: none; } #overlay.dragging { cursor: grabbing; }
+  #stage-header { position: absolute; left: 22px; right: 22px; top: 18px; pointer-events: none; display: flex; justify-content: space-between; gap: 10px; }
+  .badge { background: rgba(255,255,255,.9); border: 1px solid var(--line); border-radius: 7px; padding: 9px 13px; max-width: 47%; box-shadow: 0 3px 10px #24364a08; }
+  .badge strong { display: block; font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+  .badge small { color: var(--muted); }
+  #hint { position: absolute; bottom: 18px; left: 20px; right: 20px; text-align: center; color: var(--muted); pointer-events: none; font-size: 12px; }
+  #hint span { background: rgba(255,255,255,.9); padding: 8px 14px; border-radius: 20px; display: inline-block; }
+  #notice { display: none; position: absolute; top: 100px; left: 10%; right: 10%; padding: 16px; background: #fff5e6; border: 1px solid #e2c189; border-radius: 8px; }
+  #pick-readout { position: absolute; bottom: 70px; right: 18px; max-width: calc(100% - 36px); padding: 12px 15px; background: rgba(255,255,255,.96); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 4px 18px #24364a12; pointer-events: none; }
+  #pick-readout strong { display: block; font-size: 12px; margin-bottom: 4px; }
+  #pick-readout .coords { white-space: pre-line; overflow-wrap: anywhere; }
+  .jump { display: flex; gap: 6px; margin-top: 8px; } .jump select { width: 100px; } .jump input { min-width: 0; width: 100px; flex: 1; }
+  #status { min-height: 18px; }
+  @media (max-width: 780px) { #app { grid-template-columns: 260px 1fr; } aside { padding: 16px 12px; } #stage-header { left: 10px; right: 10px; } .badge { padding: 6px; } .badge strong { font-size: 11px; } .badge small { font-size: 10px; } #hint { font-size: 10px; left: 5px; right: 5px; } }
+  @media (max-width: 560px) { #app { display: flex; flex-direction: column-reverse; } #stage { height: 58dvh; flex: none; } aside { height: 42dvh; border-top: 1px solid var(--line); } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <div class="eyebrow">DIFF3F / CORRESPONDENCES</div>
+    <h1>__TITLE__</h1>
+    <p class="muted" id="dataset-info"></p>
+    <div class="section">
+      <h2>Explore matches</h2>
+      <label for="match-select">Landmark / match</label>
+      <select id="match-select"><option value="-1">All matches</option></select>
+      <div class="buttons"><button id="previous-match" title="Previous match">Previous</button><button id="next-match" title="Next match">Next</button></div>
+      <label class="check"><input id="isolate" type="checkbox"> Only show selected match</label>
+      <div id="match-details"><p class="muted">Select a landmark or click a line to inspect its prediction.</p></div>
+    </div>
+    <div class="section">
+      <h2>Scene</h2>
+      <select id="render-mode" aria-label="Geometry rendering"><option value="mesh">Mesh surfaces</option><option value="points">Vertices / points</option></select>
+      <label>Surface opacity <input id="surface-opacity" type="range" min="0.15" max="1" step="0.05" value="1"></label>
+      <label>Mesh separation <input id="gap" type="range" min="0" max="2" step="0.02" value="0.95"></label>
+      <label class="check"><input id="show-matches" type="checkbox" checked> Source → prediction lines</label>
+      <label class="check"><input id="show-gt" type="checkbox" checked> Manual target landmarks</label>
+      <label class="check"><input id="show-errors" type="checkbox" checked> Target error lines</label>
+      <label class="check"><input id="show-labels" type="checkbox"> Landmark labels</label>
+      <p class="muted">Markers and lines stay visible through surfaces. The gap changes the layout only.</p>
+      <div class="buttons"><button id="reset-view">Fit view</button><button id="front-view">Front</button><button id="side-view">Side</button></div>
+      <div class="legend" style="margin-top:14px">
+        <div><span class="swatch source"></span>Source vertex <span class="swatch prediction" style="margin-left:10px"></span>Prediction</div>
+        <div><span class="swatch manual"></span>Manual target (ground truth)</div>
+        <div><span class="line-swatch"></span>Match <span class="line-swatch error-swatch" style="margin-left:12px"></span>Target error</div>
+      </div>
+    </div>
+    <div class="section">
+      <h2>Point inspector</h2>
+      <p id="selection-title">Click either mesh</p>
+      <p class="muted" id="selection-hint">Surface clicks show the hit position and nearest vertex in the original geometry coordinates.</p>
+      <div id="point-details"></div>
+      <div class="buttons"><button id="copy-selection" disabled>Copy JSON</button><button id="clear-selection">Clear</button></div>
+      <div class="jump"><select id="pick-side" aria-label="Shape to inspect"><option value="source">Source</option><option value="target">Target</option></select><input id="vertex-index" type="number" min="0" step="1" placeholder="Vertex index" aria-label="Vertex index"><button id="jump-vertex">Go</button></div>
+      <button id="random-vertex" style="width:100%;margin-top:7px">Inspect a random vertex</button>
+      <p id="status" class="muted" role="status" aria-live="polite"></p>
+      <details><summary>Selection data</summary><textarea id="selection-json" readonly aria-label="Selection JSON"></textarea></details>
+      <p class="muted">Indices are zero-based feature rows. This file displays the supplied matches; clicking a new vertex does not compute a new Diff3F match.</p>
+    </div>
+    <details class="section"><summary>Data provenance</summary><p id="provenance" class="muted" style="overflow-wrap:anywhere"></p></details>
+  </aside>
+  <main id="stage" aria-label="Interactive 3D correspondence scene">
+    <canvas id="scene"></canvas><canvas id="overlay" tabindex="0" aria-label="Drag to rotate, shift-drag or right-drag to pan, scroll to zoom, click to inspect"></canvas>
+    <div id="stage-header"><div class="badge"><strong id="source-name"></strong><small id="source-count"></small></div><div class="badge"><strong id="target-name"></strong><small id="target-count"></small></div></div>
+    <div id="notice" role="alert"></div>
+    <div id="pick-readout" hidden aria-live="polite"><strong id="pick-readout-title"></strong><div id="pick-readout-coords" class="coords"></div><small class="muted">Original geometry coordinates · details in the sidebar</small></div>
+    <div id="hint"><span>Drag: rotate · Shift / right-drag: pan · Scroll: zoom · Click: inspect</span></div>
+  </main>
+</div>
+<script id="viewer-data" type="application/json">__DATA__</script>
+<script>__SCRIPT__</script>
+</body>
+</html>
