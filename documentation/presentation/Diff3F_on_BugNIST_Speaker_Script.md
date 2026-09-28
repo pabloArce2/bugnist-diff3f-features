@@ -1,146 +1,305 @@
 # Diff3F on BugNIST — Speaker Script
 
-Planned length: **22:40** (20–25 minute target)
+Planned length: **23:50** (20–25 minute target)
 
-The same dialogue is embedded in the PowerPoint speaker notes.
+The dialogue through Slide 07.1 is Pablo's wording and is kept verbatim. The `//` lines describe what should appear on screen and are not meant to be spoken.
 
 ## Slide 01 — Diff3F on BugNIST
 
-**Time:** 00:00–00:45 (0:45)  
-**Presenter cue:** Open with the final descriptor field, not the machinery.
+**Time:** 00:00–00:55 (0:55)
 
-Good morning. This project asks whether a model trained on ordinary two-dimensional images can give semantic meaning to three-dimensional insect scans. The input is only geometry reconstructed from X-ray CT: no texture, no labels, and no part annotations. The coloured cricket on the screen is the output. Every surface point has received a 2,048-dimensional Diff3F descriptor, and the colour is only a three-dimensional PCA view of that much richer feature. The practical question is not simply whether the colours look smooth. It is whether a point that means head, thorax, abdomen, antenna, or leg is represented similarly on another insect. I will first show how Diff3F transfers semantics from 2D models into 3D, then how I adapted the pipeline to BugNIST, and finally where correspondence works and where it fails.
+**Dialogue:**
 
-## Slide 02 — Can a surface know its anatomy?
+Hello, my name is Pablo Arce de Aldecoa, I am a master student in Autonomous Systems, and today I am going to talk about Diff3f, walk you through my investigation on this project, and try to awnser the question of whether a descriptor that uses a model trained on ordinary two-dimensional images can give a semantic meaning to three-dimensional scans.
 
-**Time:** 00:45–01:55 (1:10)  
-**Presenter cue:** Contrast geometry-only input with a semantic descriptor field.
+During this presentation I will be explaining a little bit with my words, how this has been done, how it works, the specific dataset I put it into practice, and the experiments and metrics that I carried out to draw some conclusions, where I was surprised, and where I think it fails.
 
-A CT reconstruction gives us a surface. At each vertex we know a position and usually a normal, but nothing says what that point represents anatomically. Coordinates alone are a poor identity: two corresponding points can be far apart because two specimens have different sizes, poses, or proportions. Classical geometric descriptors can describe local shape, but they do not bring a strong semantic prior and generally prefer shapes that are close to isometric. Diff3F takes a different route. It asks pretrained image models to interpret several views of the object, then transfers their features back to the surface. On the left is the kind of untextured mesh we begin with. On the right, colour reveals an organised descriptor field. The key question for the whole talk is whether this organisation is genuinely anatomical or only visually attractive.
+// Here I would put images of the differents bugs, the 4 of them, on grey mesh form, and then
+an arrow, and the image of the pca when the descriptor han been drawn.
 
-## Slide 03 — Coordinates move. Meaning should not.
+## Slide 02 — What are we going to answer?
 
-**Time:** 01:55–03:00 (1:05)  
-**Presenter cue:** Define the desired invariance and the target use: cross-specimen correspondence.
+**Time:** 00:55–01:45 (0:50)
 
-Imagine selecting the head tip on one cricket and asking for the equivalent point on another. A nearest Euclidean coordinate would be meaningless because the bodies are placed differently and their proportions are not identical. What we want is a descriptor whose similarity reflects what a point is, rather than where it happens to be. If the representation works, the two heads should be near each other in feature space, even when they are far apart in world space. The same idea should extend to the thorax, abdomen, and appendages. This is useful for transferring annotations, comparing morphology, and eventually building consistent measurements across specimens. But insects make the problem difficult: legs are repeated, left and right sides are approximately symmetric, and CT-derived surfaces include noise that clean benchmark meshes do not.
+**Dialogue:**
 
-## Slide 04 — How does Diff3F move semantics into 3D?
+So just to be clear on  what we are actually going to respond today:
 
-**Time:** 03:00–04:15 (1:15)  
-**Presenter cue:** Walk left to right through the pipeline image.
+1. How does the Dif3F pipeline transform an untextured 3D shape into a semantic descriptor
+feld, and which implementation choices afect the result?
+2. How should the dataset volumes be prepared before the descriptor extraction?
+3. Do the descriptors support meaningful grouping and correspondence across diferent
+specimens?
 
-The central idea is a render–interpret–project loop. First, the 3D shape is rendered from several cameras. For every camera we also produce depth, surface-normal, and visibility maps. Stable Diffusion then turns the plain render into a plausible image, while ControlNet uses those geometric maps to keep the generated appearance aligned with the original silhouette. Two feature streams are extracted: intermediate activations from the diffusion UNet and DINOv2 features from the final image. They are normalised, given equal weight, concatenated into a 2,048-dimensional pixel descriptor, and projected back through the known camera onto the visible surface. Finally, all observations of each vertex are averaged across views. No 3D training and no insect part labels are required. The only semantic instruction provided by the user is the text prompt.
+// Here I would just put the bullet points of the project in words, no images necessary
 
-## Slide 05 — What does one camera contribute?
+## Slide 03 — Can a surface know its anatomy?
 
-**Time:** 04:15–05:35 (1:20)  
-**Presenter cue:** Explain aligned geometry maps, the two feature streams, and fusion.
+**Time:** 01:45–02:35 (0:50)
 
-One view produces four perfectly aligned geometric images: the neutral render, depth, normals, and a mask of visible surface. These control the generated appearance and also tell us which pixels can safely return to the 3D object. Diffusion contributes 1,280 channels from a 32-by-32 UNet feature map. It tends to vary smoothly and carries broad spatial organisation. DINOv2 contributes 768 channels from a 37-by-37 patch grid. It sees the completed image and often separates regions more sharply, although it also inherits anything the generator hallucinates. After resizing and separate normalisation, the two streams are concatenated with equal weights. The three small colour maps on the right are PCA visualisations, not the actual descriptor used for matching. Their role is to make the complementary behaviour visible: smooth global structure from diffusion, more discrete image semantics from DINO, and both in the fused descriptor.
+**Dialogue:**
 
-## Slide 06 — Are 16 views really 16?
+The whole point of this architecture/method is to achieve an efficient zero-shot semantic segmentation. When we are treating reconstructed surfaces, we normally have information like the coordinates or the normal of each vertex, but nothing that really corresponds anatomically, and with different species, two corresponding points can differ, depending on their size, poses or proportions.
 
-**Time:** 05:35–06:45 (1:10)  
-**Presenter cue:** Use the repeated images to explain the camera-grid bug and its implication.
+// Here I would just include different images of untreated different grey meshes, like without being rotated, without being smoothed, etc, just a bunch of them. And the sentence Can a surface know its anatomy is fine ig
 
-This implementation detail turned out to matter. The original sampler combines a grid of azimuths and elevations, but elevation is swept through a full 360 degrees. Different angle pairs therefore produce the same physical camera. In a run that requests 16 views, I found only six distinct viewpoints: eight cameras collapse to the two poles and the remaining views form repeated pairs. Repetition does not change a simple average very much, but it spends the most expensive part of the computation—diffusion generation—without showing the model any new surface. I implemented Fibonacci and insect-specific samplers to avoid that loss of coverage. For comparability, the two cricket experiments shown later retain the published 16-view grid. The larvae use 16 distinct insect-specific views. This is an important caveat when we compare results.
+## Slide 04 — What is Diff3f?
 
-## Slide 07 — One prompt changes the descriptor
+**Time:** 02:35–03:25 (0:50)
 
-**Time:** 06:45–08:00 (1:15)  
-**Presenter cue:** Point out wings/body changes and connect them to downstream features.
+**Dialogue:**
 
-The prompt is the only semantic input, so its effect deserves attention. With the broad prompt “insect,” Stable Diffusion may reinterpret the same silhouette as a winged, simplified insect. A more specific cricket prompt follows the body plan more closely. The bottom row shows that the fused feature map changes as well. This is not proof that a longer prompt is always better, because diffusion is stochastic, but it shows that prompt choice changes the signal consumed by both feature extractors. There are two related implementation findings. Image-to-image strength means that only 24 of the requested 30 denoising steps actually execute, and the implementation resets the random seed for every camera, so views reuse the same noise sequence. The process is repeatable, but stochastic errors can remain correlated across views—potentially important when several legs look similar.
+In short words, Diff3f is a semantic feature descriptor, that its able to transfer semantic information from pretrained 2D models to untextured 3D geometry, with a very low input level, and in a relatively short time.
 
-## Slide 08 — How does a CT volume become Diff3F-ready?
+So unlike other intrinsic descriptors, we are using Dino Features, and Stable Difussion features, to actually gain information about what those vertexes represent, and not just what the surface around them look like. 
 
-**Time:** 08:00–09:20 (1:20)  
-**Presenter cue:** Describe the CT-to-surface chain while following the three images.
+//In this slide, just a big text saying, So what is Diff3f? and the image the owners of the first paper have. Like the actual front of their report image, you know.
 
-BugNIST contains 512-by-256-by-256 X-ray volumes, while Diff3F expects a surface. I first crop around the specimen and inspect orthogonal slices and maximum-intensity projections. A threshold creates a binary mask; small components are removed, gaps are closed and filled, and only the largest connected component is retained. Otsu is useful as an initial estimate, but it is not reliable enough by itself because the scans contain cuticle, soft tissue, mounting material, air, and artefacts. Marching cubes extracts the surface. The immediate result, in the middle, contains voxel-scale staircasing and far more triangles than the clean objects used in the original Diff3F paper. Taubin smoothing suppresses high-frequency roughness with limited shrinkage, vertex clustering simplifies the mesh, and a final manual rotation establishes a common body orientation. The right image is the geometry used for descriptor extraction.
+## Slide 05 — How does it work?
 
-## Slide 09 — How much geometry is enough?
+**Time:** 03:25–04:25 (1:00)
 
-**Time:** 09:20–10:25 (1:05)  
-**Presenter cue:** Use the three big metrics; be careful not to claim linear timing.
+**Dialogue:**
 
-I tested the same specimen at three mesh densities. The raw marching-cubes reconstruction had about 216,000 faces and 107,000 vertices. The practical choice retained roughly 50,000 faces and 24,000 vertices. The large-scale anatomy remained recognisable, and PCA visualisations of the final descriptors kept a similar spatial organisation. The smaller mesh also reduced the half-precision descriptor payload from about 418 to 94 mebibytes because there are many fewer descriptor rows. In the recorded single-view run it took 79.8 seconds instead of 134.5 seconds, a reduction of about 41 percent. A 75,000-face version happened to run faster still, which shows normal GPU-run variation, so I do not claim a linear timing law. The evidence supports 50,000 faces as a useful compromise between visible anatomy, storage, and practical runtime.
+I am going to explain this as an overview, and then we will actually get into detail of each one of the steps.
 
-## Slide 10 — Four specimens. Three tests.
+The central idea is simple, We render the shape from several viewpoints, turn each plain render into a plausible image, generate and extract image features, and project those features back to the visible surface. When we repeat this process fromn many viewpoints, we give every surface point a descriptor from not only one observation, but the average of many.
 
-**Time:** 10:25–11:25 (1:00)  
-**Presenter cue:** Introduce the two adult crickets and two larvae, then the evaluation layers.
+The result, is a 2048-dimensional sized vector per mesh vertex, or cloud point.
 
-The evaluation uses four processed specimens: a brown cricket, a black cricket, a mealworm, and a soldier fly larva. Every surface point keeps the full 2,048-dimensional descriptor. I evaluate the representation at three levels. First, label-free diagnostics ask whether nearest-neighbour correspondences are internally coherent across all 12 ordered source-to-target pairs. Second, shared PCA and shared k-means ask whether descriptors organise comparable body regions without seeing coordinates or labels. Third, manual anatomical landmarks test the question we ultimately care about: when I select a known point, does its best descriptor match land near the same anatomical point on another specimen? Each test is stricter than the previous one, so agreement across them is more meaningful than a single attractive visualisation.
+// Use the pipeline overview from the report. Keep only four simple labels below it: render, generate, extract, return to 3D.
 
-## Slide 11 — Which pair is most coherent?
+## Slide 06 — Stage 1: Rendering the shape
 
-**Time:** 11:25–12:50 (1:25)  
-**Presenter cue:** Read the heatmap by rows as source and columns as target; highlight asymmetry.
+**Time:** 04:25–05:20 (0:55)
 
-This heatmap shows cycle consistency within 10 percent of the source bounding-box diagonal. For each ordered pair, I sample 300 source vertices, match each one by cosine similarity, and then match it back. A cycle is successful if it returns close to where it started. The adult crickets are clearly the strongest and most symmetric pair: 70 percent in one direction and 72 percent in the other. The larval pair preserves some common structure, but is more direction-dependent. Adult-to-larva comparisons are mostly weaker and show more many-to-one collapse. An important lesson is that median cosine similarity alone can still look convincing when geometry is incoherent. Cycle consistency, target reuse, and distance preservation expose failures that similarity hides. Also note that matching is directional: nearest-neighbour search from A to B is not guaranteed to invert the search from B to A.
+**Dialogue:**
 
-## Slide 12 — Do unlabeled features discover body parts?
+The first stage is placing different cameras around the object, and render the geometry from each viewpoint. The cameras, look at the center of the bounding box, from a distance equal to 0.65 x the bounding box. As an obervation, the original implementation places cameras on a grid of azimuth and elevation angles, which sometimes led to repeated views, this was solved by adding other styles of capturing these renderings, like searching for angles which could be also more informative..
 
-**Time:** 12:50–14:05 (1:15)  
-**Presenter cue:** Explain shared PCA versus clustering and why a common basis/model matters.
+// Here include images of different camera views, they exist throught the project report. 
 
-Here the two cricket descriptor fields are analysed jointly. The left column uses a PCA basis fitted to both specimens, so equal colours refer to the same directions in descriptor space. The middle and right columns show one k-means model fitted to both insects at K equals 6 and K equals 10. Clustering uses all 2,048 normalised feature dimensions—no vertex coordinates, connectivity, specimen identity, or anatomical labels. The same broad organisation appears on both crickets, and some clusters concentrate on protruding structures such as legs and antennae. That is evidence that the descriptor carries part-level information. But PCA is only a visual projection, and clusters are not automatically anatomical segments. The next slide checks the cluster identities at manual landmarks to see whether this apparent organisation transfers to named points.
+## Slide 06.1 — Normal and dept maps
 
-## Slide 13 — 8 of 9 landmarks share a cluster
+**Time:** 05:20–06:00 (0:40)
 
-**Time:** 14:05–15:10 (1:05)  
-**Presenter cue:** Frame this as coarse type transfer, not dense segmentation.
+**Dialogue:**
 
-At K equals 10, eight of the nine cricket landmarks receive the same shared cluster ID on both specimens. Head tip matches head tip, thorax centre matches thorax centre, both antenna bases agree, both foreleg bases agree, and most of the remaining landmarks agree as well. This is a strong sign that broad anatomical type transfers without supervised training. The failure is revealing: left and right copies of an appendage often share the same descriptor category, and one right hind-leg base receives a different cluster. Increasing K does not simply solve the problem; eventually it fragments the two insects differently. So the clustering supports a precise claim: Diff3F organises coarse parts consistently. It does not yet provide a reliable, side-aware dense segmentation.
+Not only that, but every viewpoint not only produces a plain render, but also a depth map, a normal map, and a foreground mask, which will help ControlNet tell where the visible surface is, and how it is oriented.
 
-## Slide 14 — Can it find the exact point?
+//There is a good image in the report, Figure 4, you could use
 
-**Time:** 15:10–16:05 (0:55)  
-**Presenter cue:** Explain the manual landmark benchmark in one clean sequence.
+## Slide 07 — Generating a visible appearance
 
-The strictest test uses manual landmarks placed in Blender. The crickets have nine each: head tip, thorax centre, abdomen tip, two antenna bases, two foreleg bases, and two hind-leg bases. For a selected source landmark, I take its descriptor and compare it with every target descriptor using cosine similarity. The top match becomes the prediction. Its spatial distance from the manual target is divided by the target bounding-box diagonal, making errors comparable across scale. PCK at a chosen percentage reports how many predictions fall inside that tolerance. I evaluate both directions separately because independent nearest-neighbour matching is asymmetric. The labels define the queries and the expected answers; they never modify the descriptors or the matching rule.
+**Time:** 06:00–06:50 (0:50)
 
-## Slide 15 — Where does correspondence break?
+**Dialogue:**
 
-**Time:** 16:05–17:25 (1:20)  
-**Presenter cue:** Describe the bar chart as worst error across the two cricket directions.
+In this stage, Diff3f uses Stable Difussion, an image-to-image model to construct, or "hallucinate" an appearance. The inputs, are simply, the depth and normal maps, which provide geometric constraints, and then a text prompt, which is the only semantic information we are passing to the whole pipeline, which specifies the object category.
 
-This chart takes the worse error across the two cricket directions for each landmark. The five central or distinctive landmarks—both antenna bases, head tip, thorax centre, and abdomen tip—remain below three percent. In each direction, seven of nine landmarks are within a 10 percent tolerance. The large errors are concentrated on repeated legs. The worst right hind-leg result reaches almost 39 percent; forelegs can also jump dramatically depending on direction. That pattern is more informative than the mean error. Diff3F has not lost all anatomical information: it is accurate on the central body and distinctive endpoints. Instead, it struggles to identify which instance of a repeated, approximately symmetric structure is intended. This is the difference between recognising “leg-like” and recognising “this particular right hind leg.”
+// Figure 6 in the report 
 
-## Slide 16 — Same idea. Opposite outcome.
+## Slide 07.1 — Why does the prompt matter?
 
-**Time:** 17:25–18:45 (1:20)  
-**Presenter cue:** Use the screenshots to make direction-dependent appendage confusion concrete.
+**Time:** 06:50–07:55 (1:05)
 
-These two examples come from the same black-to-brown direction. On the left, the right foreleg prediction lands close to the manual target, with only 2.02 percent normalised error. On the right, the left foreleg prediction lands in a different region and produces 27.94 percent error. The source descriptor is still finding something semantically plausible, but not the correct instance. Independent nearest-neighbour matching imposes no mutuality, no left–right constraint, and no spatial smoothness across neighbouring queries. Several source points can collapse onto the same attractive target. This is why a high cosine score is not sufficient evidence of anatomical correctness. For repeated structures, correspondence needs additional context—global consistency, orientation, geodesic relations, or weak side labels—not just local descriptor similarity.
+**Dialogue:**
 
-## Slide 17 — Smooth features can still be wrong
+Over different tests I carried through my experiments, I realised that there is a big variation on the prompt you use, not only on the final generated image, but also on the final generated feature map (which I will explain later). It does not mean that longer prompts are always going to perform better, because the two generations are completly stochastic, but a more detailed one definetely gives a better output. There is although a big barrier here that you have most likely realised by now, Stable difussion is always going to perform worse on things it has not "seen" that much, and even if you give a super accurate description, sometimes it wont make up for that fact.
 
-**Time:** 18:45–20:05 (1:20)  
-**Presenter cue:** Contrast the attractive shared-PCA gradients with the wrong-end failure.
+// Figure 7
 
-The larvae provide the clearest warning against over-interpreting colour maps. Their shared-PCA fields vary smoothly along the main body axes, which looks organised and suggests a meaningful head-to-tail gradient. Yet exact matching is asymmetric. The head transfers reasonably in both directions, but the thorax fails in both. In the soldier-fly-to-mealworm direction, the abdomen-tip prediction reaches the opposite end of the mealworm, producing an error of 86.49 percent of the target diagonal. A descriptor field can therefore be smooth and structured while still assigning the wrong semantic orientation. The general image generator may not understand specialised larval anatomy well enough to distinguish two visually similar ends, and the pipeline has no explicit head-tail constraint. This is a small three-landmark test, not a population accuracy claim, but the failure mode is unambiguous.
+## Slide 08 — The recipe I used
 
-## Slide 18 — Part identity is not point identity
+**Time:** 07:55–08:45 (0:50)
 
-**Time:** 20:05–21:05 (1:00)  
-**Presenter cue:** Deliver the main conclusion in one sentence, then qualify it.
+**Dialogue:**
 
-The three experiments converge on one interpretation. Diff3F transfers useful part-level semantics to unseen CT-derived geometry without task-specific training. The two adult crickets show strong cycle consistency, shared clusters line up at eight of nine landmarks, and central anatomical points match accurately. But broad part identity is not the same as exact point identity. A descriptor can correctly say “this is a leg” while choosing the wrong leg, the wrong side, or—in the larval case—the wrong end. Input preparation, camera coverage, prompts, diffusion priors, and the matching rule all affect that boundary. So the method is convincing as an exploratory semantic feature generator, but it is not yet a complete side-aware dense-correspondence solution.
+Before continuing, this table is just the recipe I used for the experiments. I do not expect you to remember every number. The important ones are that I rendered sixteen views at a resolution of 512 by 512, used Stable Diffusion together with the depth and normal maps, and kept one descriptor for every vertex or point. Everything else in the table explains where those final 2048 values come from.
 
-## Slide 19 — What would make it reliable?
+// Here I would put the Table 1 we have on the report, just literally that.
 
-**Time:** 21:05–22:10 (1:05)  
-**Presenter cue:** Present three concrete next steps tied directly to observed failure modes.
+## Slide 08.1 — Where do the features come from?
 
-Three next steps follow directly from the results. First, stronger ground truth: more specimens, multiple annotators, and region-based labels would separate model error from uncertainty in choosing one exact vertex. Second, a more suitable semantic prior: comparing the general Stable Diffusion model with an insect- or specimen-specialised image model would test whether larval ambiguity comes from the generator. Third, side-aware and globally coherent matching: top-k candidates, geodesic relationships, cycle constraints, and a few weak semantic anchors could distinguish repeated appendages without requiring dense manual segmentation. I would also ablate camera samplers, prompts, seeds, and the separate diffusion and DINO contributions. The goal is to preserve Diff3F’s zero- or low-label advantage while adding exactly the structure that the failure cases show is missing.
+**Time:** 08:45–09:45 (1:00)
 
-## Slide 20 — Can a CT insect gain semantics?
+**Dialogue:**
 
-**Time:** 22:10–22:40 (0:30)  
-**Presenter cue:** Close with the qualified answer and invite questions.
+Once the visible image has been generated, Diff3f takes information from two places. The first one is Stable Diffusion itself, while the image is being created. This gives a smooth idea of the general structure of the object. The second one is Dino, which looks at the final image and normally separates parts in a sharper way.
 
-So, can an untextured CT insect gain semantics from pretrained 2D models? Yes—coarsely and usefully. Diff3F discovers organised body regions and transfers several distinctive landmarks, but exact correspondence remains vulnerable to symmetry, repeated legs, and specialised anatomy. That qualified result is the main contribution of this investigation. Thank you, and I’m happy to take questions.
+These two maps are then put together. One has 1280 values and the other has 768, which gives the final 2048-dimensional descriptor. Again, the exact number is not the interesting part. What matters is that one source gives more global information, the other gives more local image information, and the final descriptor keeps both.
+
+// Use the three feature images from the report: Diffusion, DINO and the fused Diff3f map. Keep 1280 + 768 = 2048 as the only large text.
+
+## Slide 09 — Returning the information to 3D
+
+**Time:** 09:45–10:35 (0:50)
+
+**Dialogue:**
+
+At this point the features still live on a two-dimensional image, but our original object is three-dimensional. Because we know the camera that produced every render, we can send every visible pixel back to the point or vertex that created it.
+
+We repeat that for all the views and average the observations. So a point is not described from only one image, but from all the cameras that were able to see it. This is the moment where the plain grey mesh becomes the coloured descriptor field that I showed at the beginning.
+
+// Show the two final cricket descriptor fields in 3D, using the shared PCA colours from the report.
+
+## Slide 10 — What is BugNIST?
+
+**Time:** 10:35–11:30 (0:55)
+
+**Dialogue:**
+
+Up to this point I have explained the method. Now I want to explain the data I actually used. BugNIST is a dataset of X-ray CT scans of insects and larvae. Instead of giving us a ready mesh, every specimen is stored as a three-dimensional volume of intensity values.
+
+That is useful because we can see the insect internally and from any direction, but Diff3f cannot work directly on the volume. It needs a surface. So before running any descriptor, I first had to separate the insect from the background and turn the selected voxels into geometry.
+
+// Use the orthogonal CT slices and maximum-intensity projections from the BugNIST section of the report.
+
+## Slide 11 — From a CT scan to a surface
+
+**Time:** 11:30–12:30 (1:00)
+
+**Dialogue:**
+
+The preparation follows a simple chain. First I crop the scan around the specimen. Then I choose a threshold that separates the insect from most of the background. I remove small disconnected pieces, fill gaps, and keep the largest connected object.
+
+After that, marching cubes converts the selected volume into a triangle surface. The first result is recognisable, but it is still very rough because it follows the voxel grid. Finally, I smooth and simplify it, and rotate all the specimens into a comparable orientation. This last step matters because otherwise the same camera could see the side of one insect and the end of another.
+
+// Show the CT threshold overlay, then the raw marching-cubes mesh, then the cleaned mesh, connected by arrows.
+
+## Slide 11.1 — Why simplify the mesh?
+
+**Time:** 12:30–13:40 (1:10)
+
+**Dialogue:**
+
+The original surface had around 216 thousand faces. That is much heavier and much noisier than the clean objects where Diff3f was originally tested. I compared that surface with versions of 75 thousand and 50 thousand faces.
+
+The 50 thousand face version still kept the head, the body and the legs, but reduced the number of descriptor rows by around 77 percent. In the recorded test it also went from 134.5 seconds to 79.8 seconds for one view. I would not say that the timing is perfectly linear, because the 75 thousand version happened to be faster in that run. The point is simply that a much lighter mesh kept the large anatomical structure and made the rest of the experiments more practical.
+
+// Use the smoothing comparison from the report. Next to it show only: 216k to 50k faces, 418 to 94 MiB, and 134.5 to 79.8 seconds.
+
+## Slide 12 — What did I test?
+
+**Time:** 13:40–14:30 (0:50)
+
+**Dialogue:**
+
+For the final experiments I used four specimens: a brown cricket, a black cricket, a mealworm, and a soldier fly larva.
+
+I looked at the descriptors in three different ways. First, I tested if a point could travel to another specimen and come back to the same area. Second, I checked if the descriptors grouped similar body regions without using labels. And third, I placed anatomical landmarks manually and tested if the best match actually reached the point I expected.
+
+// Show the four grey specimens. Under them use three short questions: Does it come back? Does it group body parts? Does it find the point?
+
+## Slide 13 — First test: does the match come back?
+
+**Time:** 14:30–15:50 (1:20)
+
+**Dialogue:**
+
+For this first test I did not use any manual labels. I selected 300 points from one specimen, matched each descriptor to the most similar descriptor on the other specimen, and then matched it back again. If it comes back close to the original point, the match is at least internally consistent.
+
+The clearest result is the cricket pair. Around 70 percent of the points came back within ten percent of the body size in both directions. The larvae still shared some structure, but the result depended much more on the direction. Comparisons between an adult cricket and a larva were normally weaker.
+
+This already suggested that the descriptor works better when the two shapes have a similar body plan. It also showed me that a high similarity number alone is not enough. A match can look similar in feature space and still be wrong on the geometry.
+
+// Use the cycle-consistency heatmap, but keep the cricket pair visually highlighted.
+
+## Slide 14 — Second test: does it discover body parts?
+
+**Time:** 15:50–17:05 (1:15)
+
+**Dialogue:**
+
+For the second test I put the descriptors from the two crickets into the same visual space. That is what the smooth PCA colours show. Then I used one shared k-means model to divide both insects into groups.
+
+The model did not know where the vertices were, which insect they came from, or the name of any body part. It only saw the descriptors. Even with that limitation, the same colours appeared in many of the same regions on both insects.
+
+When I checked the nine manual landmarks, eight of them received the same cluster in both crickets. That is a good result for coarse anatomy. But it also exposed the main problem: left and right legs often receive the same kind of description. The method can recognise a leg-like region without always knowing which leg it is.
+
+// Use the shared PCA and K=6/K=10 comparison. Put 8 out of 9 in one corner, without another separate slide.
+
+## Slide 15 — Third test: can it find the exact point?
+
+**Time:** 17:05–18:25 (1:20)
+
+**Dialogue:**
+
+The last test is more direct. I manually placed nine landmarks on each cricket in Blender: the head, the centre of the thorax, the end of the abdomen, the antenna bases, and four leg bases. For the larvae I used the three points that I could identify consistently: head, centre and abdomen.
+
+For every source landmark, I took its descriptor and searched the complete target for the most similar one. Then I measured the distance between the prediction and the manual target. I divided that distance by the size of the target specimen, so the errors remain comparable even when the meshes have different scales.
+
+This is the strictest experiment because a smooth colour map is not enough anymore. The prediction has to land close to the anatomical point I selected by hand.
+
+// Use a very simple flow: manual source point, descriptor match, predicted point, error to the manual target. Avoid formulas.
+
+## Slide 16 — What happened on the crickets?
+
+**Time:** 18:25–19:40 (1:15)
+
+**Dialogue:**
+
+The cricket result was better than I expected on the central parts of the body. In both directions, seven of the nine landmarks were within ten percent of the target size. The antenna bases, the head, the thorax and the abdomen stayed below three percent.
+
+The errors were not spread equally over the whole insect. They were concentrated on the legs. Some leg matches were still good, but the largest mistakes jumped to another leg or another side of the body. This is why the mean error looks much worse than the median: most of the central points are close, and a few leg failures are very far away.
+
+So I would not describe the result as a general failure. The descriptor does understand a lot of the body. The difficulty is choosing between repeated structures that look and mean almost the same thing.
+
+// Use the landmark error chart. Keep the five values below 3 percent in one colour and the large leg errors in another.
+
+## Slide 16.1 — It knows “leg”, but which leg?
+
+**Time:** 19:40–20:55 (1:15)
+
+**Dialogue:**
+
+These two examples make the problem very clear. They both go from the black cricket to the brown cricket. On the left, the right foreleg lands almost exactly where it should, with an error of 2.02 percent. On the right, the left foreleg lands in a different region and the error becomes 27.94 percent.
+
+The descriptor is not choosing a completely random place. It is often choosing something that is still leg-like. But the matching rule looks at every point independently. It has no rule saying that a right leg should remain on the right, or that neighbouring source points should stay together on the target.
+
+This was probably the most useful failure in the project, because it shows exactly what information is there and what information is still missing.
+
+// Put the successful and failed leg correspondence images side by side, with only 2.02% and 27.94% as text.
+
+## Slide 17 — The larvae gave a warning
+
+**Time:** 20:55–22:10 (1:15)
+
+**Dialogue:**
+
+The larvae gave a different and more serious warning. If we only look at their PCA colours, both descriptor fields seem smooth and organised from one end of the body to the other. It is very tempting to interpret that as a correct correspondence.
+
+But when I tested the manual points, only the head transferred well in both directions. The centre failed, and when I matched the abdomen from the soldier fly larva to the mealworm, the prediction went to the opposite end. The error was 86.49 percent of the target size.
+
+So a descriptor can look organised without understanding the direction of the anatomy. This is also where the limitation of Stable Diffusion becomes important. A general image model has seen many common animals, but probably much less useful information about the two ends of specialised larvae.
+
+// Show the two smooth larval PCA fields next to the wrong-end correspondence, with 86.49% as the only large number.
+
+## Slide 18 — What did I learn?
+
+**Time:** 22:10–23:10 (1:00)
+
+**Dialogue:**
+
+My main conclusion is that Diff3f does transfer useful semantic information to these CT-derived insects without training a new 3D model and without giving it anatomical labels.
+
+It works especially well for broad and distinctive regions. The head, the central body and the abdomen can be very consistent between the two crickets. The clustering also shows that the descriptors contain a real idea of body-part type.
+
+But part identity is not the same as point identity. Knowing that something is a leg does not automatically tell us which leg, and a smooth body gradient does not automatically tell us which end is the head. The result also depends on the quality of the mesh, the camera views, the prompt, and how familiar the image model is with the object.
+
+// Use one simple statement on screen: Part identity is not point identity. Put the two coloured crickets behind it.
+
+## Slide 19 — What would I do next?
+
+**Time:** 23:10–23:50 (0:40)
+
+**Dialogue:**
+
+The next step would be to label more specimens, try an image model that knows more about insects, and add some form of side or global consistency so repeated legs are not treated independently.
+
+But for this project, the answer is yes: an untextured CT insect can gain useful semantics from pretrained 2D models, as long as we are honest about the difference between recognising a body part and finding the exact point.
+
+Thank you, and I am happy to take questions.
+
+// Keep three short ideas: more ground truth, an insect-aware image model, and side-aware matching. Finish with Questions?
 
