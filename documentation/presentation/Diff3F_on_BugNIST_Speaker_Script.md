@@ -287,7 +287,7 @@ It works especially well for broad and distinctive regions. The head, the centra
 
 But part identity is not the same as point identity. Knowing that something is a leg does not automatically tell us which leg, and a smooth body gradient does not automatically tell us which end is the head. The result also depends on the quality of the mesh, the camera views, the prompt, and how familiar the image model is with the object.
 
-// Use one simple statement on screen: Part identity is not point identity. Put the two coloured crickets behind it.
+// Use one simple statement on screen: Part identity is not point identity. Show the two PCA-coloured crickets rotating together. Include a small button that opens the local live viewer if the app is already running.
 
 ## Slide 19 — What would I do next?
 
@@ -302,4 +302,3 @@ But for this project, the answer is yes: an untextured CT insect can gain useful
 Thank you, and I am happy to take questions.
 
 // Keep three short ideas: more ground truth, an insect-aware image model, and side-aware matching. Finish with Questions?
-
