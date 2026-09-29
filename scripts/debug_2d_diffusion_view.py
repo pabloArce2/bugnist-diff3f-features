@@ -1,3 +1,21 @@
+"""Run one Diff3F camera view step by step and save every intermediate image.
+
+Useful to see what the diffusion model and DINOv2 make of a render before
+spending GPU time on a full descriptor. Output files (in --outdir):
+
+  01_input_render.png       plain render given to Stable Diffusion
+  02_depth_control.png      depth ControlNet input
+  03_normal_control.png     normal ControlNet input
+  04_visible_mask.png       pixels that belong to the object
+  05_denoise_step_*.png     decoded latents during denoising
+  06_final_generated.png    generated image (DINOv2 input)
+  07_ai_change_map.png      amplified |generated - render|
+  08-10_*_pca.png           PCA of the UNet, DINOv2 and combined 2048-D features
+  contact_sheet.png         all of the above on one page
+
+--render-only stops after 01 (with --all-views: every camera), --skip-diffusion after 04.
+"""
+
 import argparse
 import json
 import math
@@ -7,14 +25,16 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 import torch
-import trimesh
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from bugnist_tools.camera_sampling import VIEW_SAMPLINGS, validate_view_count
+from bugnist_tools.features import pca_basis
+from bugnist_tools.geometry import load_point_tensor
+from bugnist_tools.util import pick_device
 from dataloaders.mesh_container import MeshContainer
-from camera_sampling import VIEW_SAMPLINGS, validate_view_count
 from diff3f import arange_pixels
 from diffusion import init_pipe, process_depth_map, rgb2normalmap
 from dino import get_dino_features, init_dino
@@ -37,12 +57,12 @@ def parse_args():
         "--view-sampling",
         choices=VIEW_SAMPLINGS,
         default="grid",
-        help="Camera sampling strategy. grid is the original Diff3F behavior.",
+        help="Camera layout; grid is the original Diff3F one.",
     )
     parser.add_argument("--view-index", type=int, default=0)
     parser.add_argument("--height", type=int, default=256)
     parser.add_argument("--width", type=int, default=256)
-    parser.add_argument("--tosca", action="store_true", help="Scale mesh as TOSCA mesh.")
+    parser.add_argument("--tosca", action="store_true", help="Divide coordinates by 10, as for the TOSCA meshes.")
     parser.add_argument("--no-normal-map", action="store_true", help="Use depth-only ControlNet.")
     parser.add_argument("--point-radius", type=float, default=0.012)
     parser.add_argument("--points-per-pixel", type=int, default=1)
@@ -54,7 +74,13 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--all-views", action="store_true", help="With --render-only, save every rendered camera view.")
     parser.add_argument("--render-only", action="store_true", help="Only save the selected 2D render view.")
-    parser.add_argument("--skip-ai", action="store_true", help="Only save render/control images; do not run diffusion.")
+    parser.add_argument(
+        "--skip-diffusion",
+        "--skip-ai",
+        dest="skip_diffusion",
+        action="store_true",
+        help="Only save the render and ControlNet inputs; do not run Stable Diffusion.",
+    )
     return parser.parse_args()
 
 
@@ -67,25 +93,6 @@ def image_from_float_rgb(rgb):
 def save_tensor_rgb(path, tensor):
     array = tensor.detach().float().cpu().numpy()
     image_from_float_rgb(array).save(path)
-
-
-def load_points(path):
-    path = Path(path)
-    suffix = path.suffix.lower()
-    if suffix == ".npy":
-        points = np.load(path)
-    elif suffix in (".xyz", ".txt"):
-        points = np.loadtxt(path, dtype=np.float32)
-    else:
-        loaded = trimesh.load(path, process=False, maintain_order=True)
-        if not hasattr(loaded, "vertices"):
-            raise ValueError(f"Could not read point positions from {path}.")
-        points = np.asarray(loaded.vertices)
-
-    points = np.asarray(points, dtype=np.float32)
-    if points.ndim != 2 or points.shape[1] != 3:
-        raise ValueError(f"Expected Nx3 point coordinates in {path}, got shape {points.shape}.")
-    return torch.from_numpy(points)
 
 
 def render_debug_view(args, device, use_normal_map):
@@ -104,7 +111,7 @@ def render_debug_view(args, device, use_normal_map):
         )
         point_indices = None
     else:
-        points = load_points(args.input)
+        points = load_point_tensor(args.input)
         rendered, normals, _, depth, point_indices = batch_render_point_cloud(
             device,
             points,
@@ -161,10 +168,8 @@ def pca_rgb_from_rows(rows, height, width, fit_sample, seed, normalize=True, mas
     else:
         fit_rows = fit_source
 
-    mean = fit_rows.mean(dim=0, keepdim=True)
-    fit_centered = fit_rows - mean
-    _, _, basis = torch.pca_lowrank(fit_centered, q=3, center=False, niter=4)
-    projected = ((rows - mean) @ basis[:, :3]).cpu().numpy()
+    mean, basis, _ = pca_basis(fit_rows)
+    projected = ((rows - mean) @ basis).cpu().numpy()
     scale_source = projected[mask] if mask is not None and mask.any() else projected
     low, high = np.percentile(scale_source, (1.0, 99.0), axis=0)
     span = np.maximum(high - low, 1e-6)
@@ -268,11 +273,11 @@ def write_readme(outdir, args, saved_denoising_steps):
                 "- `04_visible_mask.png`: white pixels are geometry pixels; black pixels are background.",
             ]
         )
-    if not args.render_only and not args.skip_ai:
+    if not args.render_only and not args.skip_diffusion:
         file_lines.extend(
             [
                 "- `05_denoise_step_*.png`: decoded latent snapshots during Stable Diffusion denoising.",
-                "- `06_final_generated.png`: the final image produced by the 2D AI.",
+                "- `06_final_generated.png`: the image generated by Stable Diffusion; DINOv2 reads this one.",
                 "- `07_ai_change_map.png`: amplified pixel difference between the input render and final generated image.",
                 "- `08_unet_feature_pca.png`: PCA visualization of the 1280-D diffusion UNet feature map.",
                 "- `09_dino_feature_pca.png`: PCA visualization of the 768-D DINOv2 feature map.",
@@ -282,9 +287,9 @@ def write_readme(outdir, args, saved_denoising_steps):
     file_lines.append("- `contact_sheet.png`: a compact visual summary.")
 
     lines = [
-        "# Diff3F 2D View Debug",
+        "# Diff3F single-view debug",
         "",
-        "This folder captures one 2D view from the Diff3F pipeline.",
+        "Intermediate images for one camera view, written by scripts/debug_2d_diffusion_view.py.",
         "",
         "## Files",
         "",
@@ -298,8 +303,8 @@ def write_readme(outdir, args, saved_denoising_steps):
         "",
         f"Saved denoising steps: {saved_denoising_steps}",
         "",
-        "The PCA feature images are only visual shadows of high-dimensional features. "
-        "They help us inspect structure, but matching still happens in the full descriptor space.",
+        "The PCA images show three components of high-dimensional features. "
+        "Matching always uses the full descriptor.",
     ]
     (outdir / "README.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -313,7 +318,7 @@ def main():
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
-    device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
+    device = pick_device(args.device)
     if device.type == "cuda":
         torch.cuda.set_device(device)
     use_normal_map = False if args.render_only else not args.no_normal_map
@@ -353,7 +358,7 @@ def main():
     visible_mask = (view["depth"][0] != -1).numpy()
     Image.fromarray(visible_mask.astype(np.uint8) * 255).save(outdir / "04_visible_mask.png")
 
-    if args.skip_ai:
+    if args.skip_diffusion:
         make_contact_sheet(
             outdir,
             [

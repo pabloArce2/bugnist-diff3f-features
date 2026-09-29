@@ -1,65 +1,63 @@
-# Scripts Map
+# Scripts
 
-This folder contains the practical BugNIST/Diff3F workflow scripts.
+Run from the repository root, e.g. `python scripts/preview_tif_volume.py --help`. The order
+below follows the workflow in [docs/pipeline.md](../docs/pipeline.md). Shared code is in
+[`bugnist_tools/`](../bugnist_tools).
 
-For full commands, use:
+## CT scan to geometry
 
-```text
-documentation/guides/COMMAND_GUIDE.md
-```
+| Script | Does |
+| --- | --- |
+| `preview_tif_volume.py` | slices, projections, threshold overlays and histogram of a TIFF volume |
+| `bugnist_tif_to_mesh.py` | crop, threshold and clean a scan, then marching cubes to OBJ/PLY |
+| `bugnist_tif_to_pointcloud.py` | the same segmentation, then sample a point cloud (PLY/XYZ, optional NPY) |
+| `smooth_simplify_mesh.py` | Taubin/Laplacian smoothing and decimation to a target face count |
+| `transform_geometry.py` | rotate, scale or translate a mesh or point cloud |
+| `mesh_to_pointcloud.py` | sample points on existing meshes |
+| `preview_geometry.py` | PNG preview of meshes or point clouds (matplotlib, or fast point render) |
 
-## CT Preview And Geometry Creation
+## Descriptors (GPU)
 
-```text
-preview_tif_volume.py        inspect TIFF CT slices, MIPs, histograms, threshold overlays
-bugnist_tif_to_mesh.py       convert segmented BugNIST CT volume to OBJ/PLY mesh
-bugnist_tif_to_pointcloud.py convert segmented BugNIST CT volume to PLY/NPY point cloud
-mesh_to_pointcloud.py        sample point clouds from existing mesh surfaces
-transform_geometry.py        rotate, scale, or translate meshes and point clouds
-smooth_simplify_mesh.py      smooth CT stair-steps and optionally reduce mesh face count
-```
+| Script | Does |
+| --- | --- |
+| `compute_mesh_features.py` | Diff3F descriptors for one or more meshes, `.pt` per mesh |
+| `compute_pointcloud_features.py` | the same for point clouds |
+| `debug_2d_diffusion_view.py` | one camera view step by step: render, ControlNet inputs, denoising, feature PCA |
+| `inspect_feature_quality.py` | NaNs, norms and smoothness of a `.pt`; compare two `.pt` files |
 
-## Geometry Preview
+## Visualisation
 
-```text
-preview_mesh.py             quick mesh PNG previews
-preview_pointcloud.py       quick point-cloud PNG previews
-preview_geometry_points.py  point-render preview for either meshes or point clouds
-pointcloud_to_blender_splats.py convert colored points to tiny colored mesh splats for Blender
-pointcloud_to_html_viewer.py    standalone colored point-cloud viewer with original row/XYZ click inspection
-```
+| Script | Does |
+| --- | --- |
+| `visualize_mesh_features.py` | colour a mesh by the PCA of its descriptor |
+| `visualize_pointcloud_features.py` | colour a point cloud by the PCA of its descriptor |
+| `visualize_feature_comparison.py` | shared PCA colours for several shapes, optional shared k-means |
+| `plot_pca_kmeans_scatter.py` | the shared k-means clusters in PCA space, with centroids |
+| `plot_cluster_grid.py` | one panel per shared k-means cluster |
+| `make_contact_sheet.py` | tile PNGs into a labelled grid |
+| `pointcloud_to_html_viewer.py` | self-contained HTML viewer for a coloured point cloud |
 
-## Diff3F Descriptor Extraction
+## Matching and evaluation
 
-```text
-compute_mesh_features.py       compute mesh-vertex Diff3F features; optional exact run-image capture
-compute_pointcloud_features.py compute point-cloud Diff3F features; optional exact run-image capture
-debug_2d_diffusion_view.py     save one 2D render, controls, AI trace, or feature debug images
-```
+| Script | Does |
+| --- | --- |
+| `compute_feature_correspondences.py` | nearest-neighbour matches from sampled source vertices |
+| `evaluate_correspondence_metrics.py` | cycle consistency, target reuse and other label-free diagnostics |
+| `evaluate_landmark_benchmark.py` | errors and PCK against hand-placed landmarks |
+| `correspondence_to_html_viewer.py` | self-contained HTML viewer for matches or a benchmark (uses `templates/`) |
 
-## Feature Visualization
+## Blender
 
-```text
-visualize_mesh_features.py                  color one mesh using PCA of its features
-visualize_pointcloud_features.py            color one point cloud using PCA of its features
-visualize_feature_comparison.py             shared-PCA colors for several mesh feature files; optional --kmeans K for a shared discrete cluster map (default clusters full features, not the PCA projection)
-visualize_pointcloud_feature_comparison.py  shared-PCA colors for several point-cloud feature files; optional --kmeans K for a shared discrete cluster map (default clusters full features, not the PCA projection)
-plot_pca_kmeans_scatter.py                  scatter-plot the shared-PCA feature space (PC1/PC2/PC3 pairs) colored by shared K-means cluster, with centroids
-plot_cluster_grid.py                        per-item grid isolating each shared K-means cluster one at a time against a greyed-out mesh
-make_blender_feature_comparison.py          optional Blender scene for colored PLY comparison
-make_contact_sheet.py                       tile existing preview PNGs into one labeled row/column grid image
-```
+Run these with Blender (`blender --background --python scripts/<name>.py -- <options>`),
+not with the conda Python. The usage is at the top of each file.
 
-## Correspondence And Diagnostics
+| Script | Does |
+| --- | --- |
+| `make_blender_landmark_scene.py` | a scene with movable landmark markers, for labelling by hand |
+| `export_blender_landmarks.py` | write the markers of a labelled scene to a landmark CSV |
+| `make_blender_landmark_benchmark_scene.py` | source, prediction and manual target for every landmark |
+| `make_blender_correspondence_scene.py` | two shapes side by side with a line per match |
+| `make_blender_feature_comparison.py` | coloured PLYs side by side |
 
-```text
-compute_feature_correspondences.py  nearest-neighbor feature matches between shapes
-evaluate_correspondence_metrics.py  unsupervised correspondence diagnostics
-inspect_feature_quality.py          basic feature tensor health and smoothness checks
-make_blender_correspondence_scene.py optional Blender scene for sampled correspondences
-make_blender_landmark_scene.py       create Blender scenes with movable manual landmark markers
-export_blender_landmarks.py          export Blender landmark markers to label,x,y,z CSV
-evaluate_landmark_benchmark.py       evaluate predicted matches against manual landmarks
-make_blender_landmark_benchmark_scene.py visualize manual-vs-predicted landmark errors
-correspondence_to_html_viewer.py     standalone two-mesh correspondence viewer with surface/vertex picking
-```
+`pointcloud_to_blender_splats.py` runs in the conda environment and turns a coloured point
+cloud into a small mesh that Blender displays with its colours.

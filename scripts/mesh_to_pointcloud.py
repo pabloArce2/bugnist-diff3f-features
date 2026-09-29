@@ -1,3 +1,5 @@
+"""Sample points uniformly on the surface of existing meshes."""
+
 import argparse
 from pathlib import Path
 
@@ -18,14 +20,13 @@ def parse_args():
 
 def main():
     args = parse_args()
-    np.random.seed(args.seed)
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
 
     for mesh_path in args.mesh:
         mesh_path = Path(mesh_path)
         mesh = trimesh.load(mesh_path, force="mesh")
-        points, _ = trimesh.sample.sample_surface(mesh, args.num_points)
+        points, _ = trimesh.sample.sample_surface(mesh, args.num_points, seed=args.seed)
         if args.center:
             points = points - points.mean(axis=0, keepdims=True)
 

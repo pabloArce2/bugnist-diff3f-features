@@ -1,3 +1,4 @@
+import os
 import torch
 from PIL import Image
 import numpy as np
@@ -12,9 +13,11 @@ from torchvision import transforms
 import warnings
 
 
-DIFFUSION_MODEL_ID = "runwayml/stable-diffusion-v1-5"
+# The runwayml repository now redirects to stable-diffusion-v1-5/stable-diffusion-v1-5 on the Hub.
+# DIFF3F_SD_MODEL can point at that mirror (or a local copy) if the redirect ever stops working.
+DIFFUSION_MODEL_ID = os.environ.get("DIFF3F_SD_MODEL", "runwayml/stable-diffusion-v1-5")
 ckpt = "diffusion_pytorch_model.fp16.safetensors"
-repo = "runwayml/stable-diffusion-v1-5"
+repo = DIFFUSION_MODEL_ID
 
 def HWC3(x):
     assert x.dtype == np.uint8

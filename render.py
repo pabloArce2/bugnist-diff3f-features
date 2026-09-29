@@ -4,7 +4,7 @@ from pytorch3d.renderer.mesh.shader import HardPhongShader
 from pytorch3d.renderer import MeshRenderer
 from pytorch3d.renderer.lighting import PointLights
 from normal_shading import HardPhongNormalShader
-from camera_sampling import get_view_angles
+from bugnist_tools.camera_sampling import get_view_angles
 import torch
 import time
 

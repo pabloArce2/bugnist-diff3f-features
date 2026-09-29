@@ -152,22 +152,20 @@ dmypy.json
 # Cython debug symbols
 cython_debug/
 
-# Diff3F / BugNIST local data and generated artifacts
+# BugNIST scans and everything the pipeline generates (see docs/pipeline.md)
 bugNIST/
+meshes/*/
+pointclouds/
 output/
 debug/
 previews/
-pointclouds/
 visualizations/
+pipeline_app_uploads/
+configs/
+results/
 hf_cache/
 torch_cache/
 logs/
-
-# Generated geometry and descriptor files
-meshes/bugnist/
-meshes/bugnist_individual/
-meshes/bugnist_crickets/
-meshes/Bugnist_long/
 *.pt
 *.pth
 *.blend

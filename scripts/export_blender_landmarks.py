@@ -1,3 +1,15 @@
+"""Write the LM_<name> marker positions of the open Blender file to a landmark CSV.
+
+    blender labels.blend --background --python scripts/export_blender_landmarks.py -- \
+        --output landmarks/brownCricket.csv
+
+By default (--coordinate-space blender-obj) x,y,z are converted back from
+Blender's Z-up world frame to the Y-up frame of an OBJ file, which is the frame
+of the mesh the descriptor was computed on: an OBJ imported into Blender, or
+one exported from Blender after rotating it. The CSV also keeps the raw world
+and object-local coordinates.
+"""
+
 import argparse
 import csv
 from pathlib import Path
@@ -19,12 +31,9 @@ def parse_args():
     parser.add_argument("--marker-prefix", default="LM_")
     parser.add_argument(
         "--coordinate-space",
-        choices=("local", "world", "blender-obj"),
-        default="local",
-        help=(
-            "Coordinates to write into x,y,z. Use local for the original imported mesh, "
-            "world for Blender world coordinates, or blender-obj for Blender's default OBJ export axes."
-        ),
+        choices=("blender-obj", "world", "local"),
+        default="blender-obj",
+        help="Frame of the x,y,z columns: OBJ file axes (default), Blender world, or the object's local frame.",
     )
     return parser.parse_args(argv)
 

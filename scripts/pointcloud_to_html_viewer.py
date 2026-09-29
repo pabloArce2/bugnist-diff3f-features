@@ -1,3 +1,8 @@
+"""A single self-contained HTML file for looking at a coloured point cloud in a browser.
+
+Drag to rotate, scroll to zoom, click a point to see its row index and coordinates.
+"""
+
 import argparse
 import html
 from pathlib import Path

@@ -1,11 +1,27 @@
+"""Sanity checks for one descriptor file.
+
+Reports NaNs and zero rows, the spread of row norms, and how much more similar
+neighbouring vertices (mesh edges, or nearest neighbours in a point cloud) are
+than random pairs. A healthy descriptor varies smoothly over the surface, so
+local_minus_random_median should be clearly positive. --compare-features
+compares two descriptors of the same geometry row by row.
+"""
+
 import argparse
 import json
 from pathlib import Path
+import sys
 
 import numpy as np
 from scipy.spatial import cKDTree
 import torch
-import trimesh
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from bugnist_tools.features import load_features
+from bugnist_tools.geometry import check_rows, load_geometry
 
 
 def parse_args():
@@ -17,51 +33,6 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--out-json", help="Optional path to write metrics as JSON.")
     return parser.parse_args()
-
-
-def load_features(path):
-    loaded = torch.load(path, map_location="cpu")
-    if isinstance(loaded, torch.Tensor):
-        features = loaded
-    elif isinstance(loaded, dict):
-        for key in ("features", "feat", "x"):
-            if key in loaded and isinstance(loaded[key], torch.Tensor):
-                features = loaded[key]
-                break
-        else:
-            raise ValueError(f"{path} is a dict but has no tensor under features/feat/x.")
-    else:
-        raise ValueError(f"Expected tensor or dict in {path}, got {type(loaded).__name__}.")
-
-    if features.ndim != 2:
-        raise ValueError(f"Expected [num_points, feature_dim], got {tuple(features.shape)} for {path}.")
-    return torch.nan_to_num(features.float())
-
-
-def load_geometry(path):
-    path = Path(path)
-    suffix = path.suffix.lower()
-    if suffix == ".npy":
-        points = np.load(path).astype(np.float32)
-        return points, None
-    if suffix in (".xyz", ".txt"):
-        points = np.loadtxt(path, dtype=np.float32)
-        return points, None
-
-    loaded = trimesh.load(path, process=False, maintain_order=True)
-    if isinstance(loaded, trimesh.Scene):
-        geometries = [geom for geom in loaded.geometry.values() if hasattr(geom, "vertices")]
-        if not geometries:
-            raise ValueError(f"Could not read vertices from {path}.")
-        points = np.concatenate([np.asarray(geom.vertices) for geom in geometries], axis=0).astype(np.float32)
-        return points, None
-
-    if not hasattr(loaded, "vertices"):
-        raise ValueError(f"Could not read vertices from {path}.")
-
-    points = np.asarray(loaded.vertices, dtype=np.float32)
-    faces = np.asarray(loaded.faces, dtype=np.int64) if hasattr(loaded, "faces") and len(loaded.faces) else None
-    return points, faces
 
 
 def summarize(values, prefix):
@@ -108,12 +79,7 @@ def main():
     rng = np.random.default_rng(args.seed)
     points, faces = load_geometry(args.geometry)
     features = load_features(args.features)
-
-    if len(points) != len(features):
-        raise ValueError(
-            f"Geometry has {len(points)} points/vertices, but features have {len(features)} rows. "
-            "Use the exact geometry that produced the features."
-        )
+    check_rows(Path(args.geometry).name, len(points), len(features))
 
     norms = features.norm(dim=1)
     normalized = torch.nn.functional.normalize(features, dim=1)

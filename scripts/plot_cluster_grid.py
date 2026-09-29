@@ -1,151 +1,58 @@
+"""One image per shape with K panels, each showing a single shared k-means cluster.
+
+The cluster is drawn in its colour on top of the rest of the shape in grey, so
+clusters hidden behind others in the combined map can be inspected one by one.
+Uses the same shared PCA and k-means as visualize_feature_comparison.py.
+"""
+
 import argparse
-import colorsys
 import math
 from pathlib import Path
+import sys
 
 import numpy as np
-import torch
-import trimesh
 from PIL import Image, ImageDraw, ImageFont
-from sklearn.cluster import KMeans
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from bugnist_tools.features import CLUSTER_SPACES, SharedPCA, cluster_palette, fit_shared_kmeans, load_features, predict_clusters
+from bugnist_tools.geometry import check_rows, load_geometry
+from bugnist_tools.preview import rotate_points, thicken
+from bugnist_tools.util import safe_name
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="For each --item, render one grid image with K panels, each panel isolating a single "
-        "shared K-means cluster (highlighted in its color) against the rest of the mesh (greyed out). "
-        "This is the 'inspect one cluster at a time' view, as opposed to visualize_feature_comparison.py's "
-        "single image with every cluster overlapping at once."
-    )
+    parser = argparse.ArgumentParser(description="Render one panel per shared k-means cluster for every item.")
     parser.add_argument(
         "--item",
         nargs=3,
         action="append",
-        metavar=("NAME", "MESH", "FEATURES"),
+        metavar=("NAME", "GEOMETRY", "FEATURES"),
         required=True,
-        help="Comparison item: label, mesh path, .pt feature tensor path. One grid PNG is produced per item.",
+        help="Label, mesh or point cloud, and its .pt descriptor. One grid image is written per item.",
     )
     parser.add_argument("--kmeans", type=int, required=True, metavar="K")
     parser.add_argument(
         "--cluster-on",
-        choices=("pca", "features"),
+        choices=CLUSTER_SPACES,
         default="features",
-        help="Same meaning and same default as visualize_feature_comparison.py: cluster the full 2048-D "
-        "descriptor by default, or the 3-D shared-PCA projection with 'pca'.",
+        help="Cluster the full descriptor (default) or its 3-D shared-PCA projection.",
     )
     parser.add_argument("--outdir", default="visualizations/pca_kmeans_cluster_grid")
     parser.add_argument("--fit-sample-per-item", type=int, default=8000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-normalize", action="store_true")
-    parser.add_argument("--panel-size", type=int, default=420, help="Each cluster panel's square size in pixels.")
+    parser.add_argument("--panel-size", type=int, default=420, help="Panel width and height in pixels.")
     parser.add_argument("--elev", type=float, default=24.0)
     parser.add_argument("--azim", type=float, default=38.0)
     parser.add_argument("--grey", type=int, nargs=3, default=(222, 222, 222), metavar=("R", "G", "B"))
     return parser.parse_args()
 
 
-def safe_name(name):
-    return "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in name)
-
-
-def load_features(path):
-    loaded = torch.load(path, map_location="cpu")
-    if isinstance(loaded, torch.Tensor):
-        features = loaded
-    elif isinstance(loaded, dict):
-        for key in ("features", "feat", "x"):
-            if key in loaded and isinstance(loaded[key], torch.Tensor):
-                features = loaded[key]
-                break
-        else:
-            raise ValueError(f"{path} is a dict but has no tensor under features/feat/x.")
-    else:
-        raise ValueError(f"Expected tensor or dict in {path}, got {type(loaded).__name__}.")
-
-    if features.ndim != 2:
-        raise ValueError(f"Expected [num_vertices, feature_dim] in {path}, got {tuple(features.shape)}.")
-    return torch.nan_to_num(features.float())
-
-
-def sample_features(features, count, rng):
-    if len(features) <= count:
-        return features
-    indices = torch.from_numpy(rng.choice(len(features), size=count, replace=False)).long()
-    return features[indices]
-
-
-def fit_shared_pca(feature_sets, sample_count, seed, normalize):
-    rng = np.random.default_rng(seed)
-    samples = []
-    for features in feature_sets:
-        if normalize:
-            features = torch.nn.functional.normalize(features, dim=1)
-        samples.append(sample_features(features, sample_count, rng))
-
-    fit_features = torch.cat(samples, dim=0)
-    mean = fit_features.mean(dim=0, keepdim=True)
-    fit_centered = fit_features - mean
-    _, _, basis = torch.pca_lowrank(fit_centered, q=3, center=False, niter=4)
-    return mean, basis[:, :3]
-
-
-def fit_shared_kmeans(feature_sets, mean, basis, k, sample_count, seed, normalize, cluster_on):
-    rng = np.random.default_rng(seed)
-    samples = []
-    for features in feature_sets:
-        if normalize:
-            features = torch.nn.functional.normalize(features, dim=1)
-        samples.append(sample_features(features, sample_count, rng))
-    fit_features = torch.cat(samples, dim=0)
-
-    if cluster_on == "pca":
-        fit_vectors = ((fit_features - mean) @ basis).cpu().numpy()
-    else:
-        fit_vectors = fit_features.cpu().numpy()
-
-    kmeans = KMeans(n_clusters=k, random_state=seed, n_init=10)
-    kmeans.fit(fit_vectors)
-    return kmeans
-
-
-def predict_cluster_labels(features, mean, basis, kmeans, normalize, cluster_on):
-    if normalize:
-        features = torch.nn.functional.normalize(features, dim=1)
-    if cluster_on == "pca":
-        vectors = ((features - mean) @ basis).cpu().numpy()
-    else:
-        vectors = features.cpu().numpy()
-    return kmeans.predict(vectors)
-
-
-def cluster_palette(k):
-    colors = []
-    for i in range(k):
-        hue = i / k
-        r, g, b = colorsys.hsv_to_rgb(hue, 0.75, 0.90)
-        colors.append((int(round(r * 255)), int(round(g * 255)), int(round(b * 255))))
-    return np.array(colors, dtype=np.uint8)
-
-
-def rotate_points(points, elev_deg, azim_deg):
-    elev = math.radians(elev_deg)
-    azim = math.radians(azim_deg)
-    ca = math.cos(azim)
-    sa = math.sin(azim)
-    ce = math.cos(elev)
-    se = math.sin(elev)
-
-    x = points[:, 0]
-    y = points[:, 1]
-    z = points[:, 2]
-    x1 = ca * x - sa * y
-    y1 = sa * x + ca * y
-    return np.column_stack((x1, ce * y1 - se * z, se * y1 + ce * z))
-
-
 def render_isolated_panel(vertices, labels, cluster_id, palette, grey, size, elev, azim, dot_radius=1):
-    """Render one panel: every vertex in `grey`, except `cluster_id`'s vertices painted in their palette
-    color and drawn last, so they are always visible instead of being hidden behind non-highlighted points."""
+    """All points in grey, then the points of one cluster in colour on top."""
     rotated = rotate_points(vertices - vertices.mean(axis=0, keepdims=True), elev, azim)
     mins = rotated.min(axis=0)
     maxs = rotated.max(axis=0)
@@ -153,40 +60,24 @@ def render_isolated_panel(vertices, labels, cluster_id, palette, grey, size, ele
     scale = size * 0.86 / span
     center_xy = (mins[:2] + maxs[:2]) / 2
 
-    def to_pixels(rot_subset):
-        xy = (rot_subset[:, :2] - center_xy) * scale + size / 2
+    def to_pixels(points):
+        xy = (points[:, :2] - center_xy) * scale + size / 2
         x = np.rint(xy[:, 0]).astype(np.int32)
         y = np.rint(size - xy[:, 1]).astype(np.int32)
-        z = rot_subset[:, 2]
         valid = (x >= 0) & (x < size) & (y >= 0) & (y < size)
-        return x[valid], y[valid], z[valid]
+        return x[valid], y[valid], points[valid, 2]
 
     image = np.full((size, size, 3), 248, dtype=np.uint8)
+    x, y, z = to_pixels(rotated)
+    order = np.argsort(z)
+    image[y[order], x[order]] = np.array(grey, dtype=np.uint8)
 
-    x_all, y_all, z_all = to_pixels(rotated)
-    grey_arr = np.array(grey, dtype=np.uint8)
-    order = np.argsort(z_all)
-    image[y_all[order], x_all[order]] = grey_arr
-
-    mask = labels == cluster_id
-    x_sub, y_sub, z_sub = to_pixels(rotated[mask])
-
-    if dot_radius > 0 and len(x_sub) > 0:
-        offsets = [
-            (dx, dy) for dx in range(-dot_radius, dot_radius + 1) for dy in range(-dot_radius, dot_radius + 1)
-        ]
-        xs = np.concatenate([x_sub + dx for dx, dy in offsets])
-        ys = np.concatenate([y_sub + dy for dx, dy in offsets])
-        zs = np.tile(z_sub, len(offsets))
-        valid = (xs >= 0) & (xs < size) & (ys >= 0) & (ys < size)
-        xs, ys, zs = xs[valid], ys[valid], zs[valid]
-    else:
-        xs, ys, zs = x_sub, y_sub, z_sub
-
-    if len(xs) > 0:
-        color = np.array(palette[cluster_id], dtype=np.uint8)
-        order2 = np.argsort(zs)
-        image[ys[order2], xs[order2]] = color
+    x, y, z = to_pixels(rotated[labels == cluster_id])
+    if dot_radius > 0 and len(x) > 0:
+        x, y, z, _ = thicken(x, y, z, None, size, dot_radius)
+    if len(x) > 0:
+        order = np.argsort(z)
+        image[y[order], x[order]] = np.array(palette[cluster_id], dtype=np.uint8)
 
     return Image.fromarray(image)
 
@@ -230,37 +121,30 @@ def main():
     if k < 2:
         raise ValueError("--kmeans must be at least 2.")
 
-    names = []
-    meshes = []
-    feature_sets = []
-    for name, mesh_path, feature_path in args.item:
-        mesh = trimesh.load(mesh_path, force="mesh", process=False, maintain_order=True)
+    names, vertex_sets, feature_sets = [], [], []
+    for name, geometry_path, feature_path in args.item:
+        vertices, _ = load_geometry(geometry_path)
         features = load_features(feature_path)
-        if len(mesh.vertices) != features.shape[0]:
-            raise ValueError(
-                f"{name}: mesh has {len(mesh.vertices)} vertices but features have {features.shape[0]} rows."
-            )
+        check_rows(name, len(vertices), features.shape[0])
         names.append(name)
-        meshes.append(mesh)
+        vertex_sets.append(vertices)
         feature_sets.append(features)
 
-    mean, basis = fit_shared_pca(feature_sets, args.fit_sample_per_item, args.seed, normalize)
-    kmeans = fit_shared_kmeans(
-        feature_sets, mean, basis, k, args.fit_sample_per_item, args.seed, normalize, args.cluster_on
-    )
+    pca = SharedPCA(feature_sets, args.fit_sample_per_item, args.seed, normalize)
+    kmeans = fit_shared_kmeans(feature_sets, pca, k, args.fit_sample_per_item, args.seed, args.cluster_on)
     palette = cluster_palette(k)
     rows, cols = grid_shape(k)
 
     manifest_lines = [
-        "Per-cluster isolation grid (one panel per cluster, rest of mesh greyed out)",
+        "Per-cluster grid (one panel per cluster, the rest of the shape in grey)",
         f"kmeans_k: {k}",
         f"cluster_on: {args.cluster_on}",
         f"seed: {args.seed}",
         "",
     ]
 
-    for name, mesh, features in zip(names, meshes, feature_sets):
-        labels = predict_cluster_labels(features, mean, basis, kmeans, normalize, args.cluster_on)
+    for name, vertices, features in zip(names, vertex_sets, feature_sets):
+        labels = predict_clusters(features, pca, kmeans, args.cluster_on)
         counts = np.bincount(labels, minlength=k)
         total = max(int(counts.sum()), 1)
 
@@ -269,7 +153,7 @@ def main():
         for cluster_id in range(k):
             panels.append(
                 render_isolated_panel(
-                    mesh.vertices, labels, cluster_id, palette, args.grey, args.panel_size, args.elev, args.azim
+                    vertices, labels, cluster_id, palette, args.grey, args.panel_size, args.elev, args.azim
                 )
             )
             pct = 100.0 * counts[cluster_id] / total

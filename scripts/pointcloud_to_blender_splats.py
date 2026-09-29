@@ -1,8 +1,21 @@
+"""Turn a coloured point cloud into a mesh of tiny coloured octahedra.
+
+Blender does not show vertex colours of a point cloud without faces; the splat
+mesh imports with its colours visible.
+"""
+
 import argparse
 from pathlib import Path
+import sys
 
 import numpy as np
 import trimesh
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from bugnist_tools.geometry import load_colored_points
 
 
 OCTAHEDRON_OFFSETS = np.array(
@@ -52,28 +65,6 @@ def parse_args():
     parser.add_argument("--max-points", type=int, help="Optional random subset for a lighter Blender file.")
     parser.add_argument("--seed", type=int, default=42)
     return parser.parse_args()
-
-
-def load_colored_points(path):
-    loaded = trimesh.load(path, process=False, maintain_order=True)
-    if not hasattr(loaded, "vertices"):
-        raise ValueError(f"Could not read point positions from {path}.")
-
-    points = np.asarray(loaded.vertices, dtype=np.float32)
-    colors = getattr(loaded, "colors", None)
-    if colors is None or len(colors) != len(points):
-        colors = np.full((len(points), 4), 210, dtype=np.uint8)
-        colors[:, 3] = 255
-    else:
-        colors = np.asarray(colors, dtype=np.uint8)
-        if colors.shape[1] == 3:
-            colors = np.column_stack((colors, np.full(len(colors), 255, dtype=np.uint8)))
-
-    if points.ndim != 2 or points.shape[1] != 3:
-        raise ValueError(f"Expected Nx3 point coordinates, got shape {points.shape}.")
-    if len(points) == 0:
-        raise ValueError(f"{path} contains no points.")
-    return points, colors
 
 
 def subset(points, colors, max_points, seed):

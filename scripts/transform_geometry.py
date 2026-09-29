@@ -1,3 +1,8 @@
+"""Rotate, scale or translate a mesh or point cloud and save a copy.
+
+A transformed shape has new vertex positions, so compute a new descriptor for it.
+"""
+
 import argparse
 from pathlib import Path
 

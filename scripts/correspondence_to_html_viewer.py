@@ -1,3 +1,11 @@
+"""A self-contained HTML viewer for correspondences between two shapes.
+
+Takes either a benchmark CSV (evaluate_landmark_benchmark.py) or a matches CSV
+(compute_feature_correspondences.py). The endpoint coordinates in the CSV are
+checked against the geometry files, so the viewer refuses a mesh that does not
+match the one the matches were computed on.
+"""
+
 import argparse
 import csv
 import html
@@ -15,9 +23,7 @@ TEMPLATE_DIR = SCRIPT_DIR / "templates"
 HTML_TEMPLATE_PATH = TEMPLATE_DIR / "correspondence_viewer.html"
 JS_TEMPLATE_PATH = TEMPLATE_DIR / "correspondence_viewer.js"
 
-# Benchmark CSV files are rounded for readability, while geometry readers use
-# floating-point vertex coordinates. This is deliberately much smaller than a
-# visually meaningful mesh displacement but comfortably covers CSV rounding.
+# Benchmark CSVs store coordinates rounded to 6 decimals.
 COORDINATE_ATOL = 1e-4
 
 BENCHMARK_REQUIRED_COLUMNS = {
@@ -153,8 +159,7 @@ def _normalize_rgb(colors, vertex_count, path):
 
 
 def _vertex_colors(geometry, vertex_count, path):
-    # PointCloud stores colors directly. Trimesh may synthesize a default visual,
-    # so only `kind == "vertex"` is treated as real per-vertex color data.
+    # trimesh invents a default colour for uncoloured meshes; only kind == "vertex" is real data.
     if isinstance(geometry, trimesh.points.PointCloud):
         return _normalize_rgb(getattr(geometry, "colors", None), vertex_count, path)
 
@@ -346,8 +351,7 @@ def _benchmark_match(row, source_vertices, target_vertices, path, row_number):
     source_csv = _parse_xyz(row, ("source_x", "source_y", "source_z"), path, row_number)
     target_csv = _parse_xyz(row, ("pred_target_x", "pred_target_y", "pred_target_z"), path, row_number)
     gt_vertex_csv = _parse_xyz(row, ("target_gt_x", "target_gt_y", "target_gt_z"), path, row_number)
-    # This is the unsnapped manual annotation. It is intentionally used for the
-    # error line; using target_gt_* would measure a different, vertex-space error.
+    # The error line ends at the manual landmark itself, not at the vertex it was snapped to.
     manual_gt = _parse_xyz(
         row,
         ("target_landmark_x", "target_landmark_y", "target_landmark_z"),
@@ -478,8 +482,7 @@ def render_html(payload, title, html_template_path=HTML_TEMPLATE_PATH, js_templa
         "__DATA__": safe_data_json,
         "__SCRIPT__": script,
     }
-    # A one-pass substitution prevents a label or path containing a literal
-    # placeholder such as "__SCRIPT__" from being rewritten after insertion.
+    # One pass, so a label that happens to contain "__SCRIPT__" is not replaced again.
     return re.sub(r"__TITLE__|__DATA__|__SCRIPT__", lambda match: replacements[match.group(0)], template)
 
 

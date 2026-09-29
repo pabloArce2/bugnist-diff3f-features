@@ -1,3 +1,10 @@
+"""Blender scene showing, per landmark, the source point, the predicted match and the manual target.
+
+    blender --background --python scripts/make_blender_landmark_benchmark_scene.py -- \
+        --source-label A --source-geometry a.obj --target-label B --target-geometry b.obj \
+        --benchmark-csv A_to_B_landmark_benchmark.csv --output A_to_B_benchmark.blend
+"""
+
 import argparse
 import csv
 import math

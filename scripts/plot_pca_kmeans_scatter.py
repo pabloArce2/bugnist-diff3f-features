@@ -1,42 +1,56 @@
+"""Scatter plot of the shared-PCA feature space, coloured by shared k-means cluster.
+
+This is the feature-space view of the clustering (points, centroids and one
+dashed covariance ellipse per cluster) on the three pairwise planes PC1-PC2,
+PC1-PC3 and PC2-PC3. Marker shape identifies the item. Cluster ids and colours
+match visualize_feature_comparison.py for the same items, K and seed.
+"""
+
 import argparse
-import colorsys
 from pathlib import Path
+import sys
 
 import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
 from matplotlib.patches import Ellipse
-from sklearn.cluster import KMeans
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from bugnist_tools.features import (
+    CLUSTER_SPACES,
+    SharedPCA,
+    cluster_centers_pca,
+    cluster_colors,
+    fit_shared_kmeans,
+    load_features,
+    sample_rows,
+)
 
 PROJECTIONS = [(0, 1, "PC1", "PC2"), (0, 2, "PC1", "PC3"), (1, 2, "PC2", "PC3")]
 MARKERS = ["o", "^", "s", "D", "v", "P", "*"]
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(
-        description="Scatter-plot the shared-PCA feature space colored by shared K-means cluster id, with "
-        "cluster centroids marked. This is the 'feature space' view of the clustering: raw PCA points and "
-        "K-means centroids, as opposed to the on-mesh region-map view from visualize_feature_comparison.py."
-    )
+    parser = argparse.ArgumentParser(description="Scatter-plot the shared-PCA feature space colored by k-means cluster.")
     parser.add_argument(
         "--item",
         nargs=2,
         action="append",
         metavar=("NAME", "FEATURES"),
         required=True,
-        help="Comparison item: label, .pt feature tensor path. No mesh needed; this plots feature space only.",
+        help="Label and .pt descriptor. Repeat for every shape; no geometry is needed.",
     )
     parser.add_argument("--kmeans", type=int, required=True, metavar="K", help="Number of shared clusters.")
     parser.add_argument(
         "--cluster-on",
-        choices=("pca", "features"),
+        choices=CLUSTER_SPACES,
         default="features",
-        help="Same meaning and same default as visualize_feature_comparison.py. Centroids are always shown "
-        "projected into the 3-D PCA space for plotting, even when clustering happened in full descriptor "
-        "space -- that projection is only how this script draws the result, not what K-means used to find it.",
+        help="Cluster the full descriptor (default) or its 3-D shared-PCA projection. The plot is always in PCA space.",
     )
     parser.add_argument("--outdir", default="visualizations/pca_kmeans_scatter")
     parser.add_argument("--fit-sample-per-item", type=int, default=8000)
@@ -44,87 +58,13 @@ def parse_args():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--no-normalize", action="store_true")
     parser.add_argument(
-        "--ellipse-std", type=float, default=2.0, help="Std devs for the dashed cluster ellipse. 0 disables it."
+        "--ellipse-std", type=float, default=2.0, help="Size of the dashed cluster ellipse in standard deviations; 0 hides it."
     )
     parser.add_argument("--point-size", type=float, default=10.0)
     parser.add_argument("--alpha", type=float, default=0.55)
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--title", default=None)
     return parser.parse_args()
-
-
-def load_features(path):
-    loaded = torch.load(path, map_location="cpu")
-    if isinstance(loaded, torch.Tensor):
-        features = loaded
-    elif isinstance(loaded, dict):
-        for key in ("features", "feat", "x"):
-            if key in loaded and isinstance(loaded[key], torch.Tensor):
-                features = loaded[key]
-                break
-        else:
-            raise ValueError(f"{path} is a dict but has no tensor under features/feat/x.")
-    else:
-        raise ValueError(f"Expected tensor or dict in {path}, got {type(loaded).__name__}.")
-
-    if features.ndim != 2:
-        raise ValueError(f"Expected [num_rows, feature_dim] in {path}, got {tuple(features.shape)}.")
-    return torch.nan_to_num(features.float())
-
-
-def sample_features(features, count, rng):
-    if len(features) <= count:
-        return features
-    indices = torch.from_numpy(rng.choice(len(features), size=count, replace=False)).long()
-    return features[indices]
-
-
-def fit_shared_pca(feature_sets, sample_count, seed, normalize):
-    rng = np.random.default_rng(seed)
-    samples = []
-    for features in feature_sets:
-        if normalize:
-            features = torch.nn.functional.normalize(features, dim=1)
-        samples.append(sample_features(features, sample_count, rng))
-
-    fit_features = torch.cat(samples, dim=0)
-    mean = fit_features.mean(dim=0, keepdim=True)
-    fit_centered = fit_features - mean
-    _, _, basis = torch.pca_lowrank(fit_centered, q=3, center=False, niter=4)
-    return mean, basis[:, :3]
-
-
-def fit_shared_kmeans(feature_sets, mean, basis, k, sample_count, seed, normalize, cluster_on):
-    rng = np.random.default_rng(seed)
-    samples = []
-    for features in feature_sets:
-        if normalize:
-            features = torch.nn.functional.normalize(features, dim=1)
-        samples.append(sample_features(features, sample_count, rng))
-    fit_features = torch.cat(samples, dim=0)
-
-    if cluster_on == "pca":
-        fit_vectors = ((fit_features - mean) @ basis).cpu().numpy()
-    else:
-        fit_vectors = fit_features.cpu().numpy()
-
-    kmeans = KMeans(n_clusters=k, random_state=seed, n_init=10)
-    kmeans.fit(fit_vectors)
-    return kmeans
-
-
-def project_pca(features, mean, basis, normalize):
-    if normalize:
-        features = torch.nn.functional.normalize(features, dim=1)
-    return ((features - mean) @ basis).cpu().numpy()
-
-
-def cluster_palette(k):
-    colors = []
-    for i in range(k):
-        hue = i / k
-        colors.append(colorsys.hsv_to_rgb(hue, 0.75, 0.90))
-    return colors
 
 
 def covariance_ellipse(points_2d, n_std):
@@ -152,35 +92,20 @@ def main():
     if args.kmeans < 2:
         raise ValueError("--kmeans must be at least 2.")
 
-    names = []
-    feature_sets = []
-    for name, feature_path in args.item:
-        feature_sets.append(load_features(feature_path))
-        names.append(name)
+    names = [name for name, _ in args.item]
+    feature_sets = [load_features(path) for _, path in args.item]
 
-    mean, basis = fit_shared_pca(feature_sets, args.fit_sample_per_item, args.seed, normalize)
-    kmeans = fit_shared_kmeans(
-        feature_sets, mean, basis, args.kmeans, args.fit_sample_per_item, args.seed, normalize, args.cluster_on
-    )
-    palette = cluster_palette(args.kmeans)
-
-    if args.cluster_on == "pca":
-        centers_3d = kmeans.cluster_centers_
-    else:
-        centers_features = torch.from_numpy(kmeans.cluster_centers_).float()
-        centers_3d = ((centers_features - mean) @ basis).cpu().numpy()
+    pca = SharedPCA(feature_sets, args.fit_sample_per_item, args.seed, normalize)
+    kmeans = fit_shared_kmeans(feature_sets, pca, args.kmeans, args.fit_sample_per_item, args.seed, args.cluster_on)
+    palette = cluster_colors(args.kmeans)
+    centers_3d = cluster_centers_pca(pca, kmeans, args.cluster_on)
 
     rng = np.random.default_rng(args.seed)
     plotted = []
     for i, (name, features) in enumerate(zip(names, feature_sets)):
-        plot_features = sample_features(features, args.plot_sample_per_item, rng)
-        projected = project_pca(plot_features, mean, basis, normalize)
-        if args.cluster_on == "pca":
-            vectors = projected
-        else:
-            feats = torch.nn.functional.normalize(plot_features, dim=1) if normalize else plot_features
-            vectors = feats.cpu().numpy()
-        labels = kmeans.predict(vectors)
+        rows = pca.prepare(sample_rows(features, args.plot_sample_per_item, rng))
+        projected = pca.project_prepared(rows)
+        labels = kmeans.predict(projected if args.cluster_on == "pca" else rows.cpu().numpy())
         plotted.append((name, MARKERS[i % len(MARKERS)], projected, labels))
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 5.2))

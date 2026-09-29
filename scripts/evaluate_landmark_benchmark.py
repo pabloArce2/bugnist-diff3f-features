@@ -1,3 +1,17 @@
+"""Score Diff3F correspondences against manually placed landmarks.
+
+For every label present in both landmark CSVs (label,x,y,z, from
+export_blender_landmarks.py): snap the source landmark to its nearest vertex,
+find the target vertex with the most similar descriptor, and measure how far
+that prediction is from the manual target landmark, as a fraction of the
+target's bounding-box diagonal. Also reports where the true target vertex
+ranks among all target vertices by similarity.
+
+Outputs <source>_to_<target>_landmark_benchmark.csv (one row per landmark),
+..._landmark_summary.json (PCK and averages) and ..._predicted_matches.csv.
+The direction matters: run it once per direction.
+"""
+
 import argparse
 import json
 from pathlib import Path
@@ -6,14 +20,15 @@ import sys
 import numpy as np
 import pandas as pd
 import torch
-import trimesh
 from tqdm import tqdm
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from dataloaders.mesh_container import MeshContainer
+from bugnist_tools.features import load_features
+from bugnist_tools.geometry import bbox_diagonal, check_rows, load_vertices
+from bugnist_tools.util import pick_device, safe_name
 
 
 def parse_args():
@@ -21,11 +36,11 @@ def parse_args():
         description="Evaluate Diff3F correspondences against manual landmark labels."
     )
     parser.add_argument("--source-name", required=True)
-    parser.add_argument("--source-geometry", required=True, help="Source mesh or point cloud geometry.")
+    parser.add_argument("--source-geometry", required=True, help="Source mesh or point cloud.")
     parser.add_argument("--source-features", required=True)
     parser.add_argument("--source-landmarks", required=True, help="CSV with columns label,x,y,z.")
     parser.add_argument("--target-name", required=True)
-    parser.add_argument("--target-geometry", required=True, help="Target mesh or point cloud geometry.")
+    parser.add_argument("--target-geometry", required=True, help="Target mesh or point cloud.")
     parser.add_argument("--target-features", required=True)
     parser.add_argument("--target-landmarks", required=True, help="CSV with columns label,x,y,z.")
     parser.add_argument("--outdir", default="visualizations/landmark_benchmark")
@@ -40,59 +55,6 @@ def parse_args():
         help="PCK thresholds as fractions of target bounding-box diagonal.",
     )
     return parser.parse_args()
-
-
-def safe_name(name):
-    return "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in name)
-
-
-def load_geometry_vertices(path):
-    path = Path(path)
-    suffix = path.suffix.lower()
-    if suffix == ".npy":
-        vertices = np.load(path)
-    elif suffix in (".xyz", ".txt"):
-        vertices = np.loadtxt(path, dtype=np.float32)
-    elif suffix == ".obj":
-        # Match compute_mesh_features.py: descriptor row i corresponds to OBJ
-        # record ``v i``. Trimesh otherwise expands Blender's separate normal
-        # indices into duplicate vertices and breaks that row correspondence.
-        vertices = MeshContainer().load_from_file(str(path)).vert
-    else:
-        loaded = trimesh.load(path, process=False, maintain_order=True)
-        if isinstance(loaded, trimesh.Scene):
-            geometries = [geom for geom in loaded.geometry.values() if hasattr(geom, "vertices")]
-            if not geometries:
-                raise ValueError(f"Could not load vertices or points from {path}.")
-            vertices = np.concatenate([np.asarray(geom.vertices) for geom in geometries], axis=0)
-        elif hasattr(loaded, "vertices"):
-            vertices = np.asarray(loaded.vertices)
-        else:
-            raise ValueError(f"Could not load vertices or points from {path}.")
-
-    vertices = np.asarray(vertices, dtype=np.float32)
-    if vertices.ndim != 2 or vertices.shape[1] != 3:
-        raise ValueError(f"Expected Nx3 geometry coordinates in {path}, got shape {vertices.shape}.")
-    return vertices
-
-
-def load_features(path):
-    loaded = torch.load(path, map_location="cpu")
-    if isinstance(loaded, torch.Tensor):
-        features = loaded
-    elif isinstance(loaded, dict):
-        for key in ("features", "feat", "x"):
-            if key in loaded and isinstance(loaded[key], torch.Tensor):
-                features = loaded[key]
-                break
-        else:
-            raise ValueError(f"{path} is a dict but has no tensor under features/feat/x.")
-    else:
-        raise ValueError(f"Expected tensor or dict in {path}, got {type(loaded).__name__}.")
-
-    if features.ndim != 2:
-        raise ValueError(f"Expected feature tensor [num_points, feature_dim], got {tuple(features.shape)}.")
-    return torch.nan_to_num(features.float())
 
 
 def canonical_column(columns, candidates):
@@ -150,12 +112,6 @@ def nearest_geometry_indices(vertices, query_points, chunk_size):
     return best_indices, np.sqrt(best_dist2)
 
 
-def bbox_diagonal(vertices):
-    mins = vertices.min(axis=0)
-    maxs = vertices.max(axis=0)
-    return max(float(np.linalg.norm(maxs - mins)), 1e-6)
-
-
 def nearest_feature_matches(query_features, target_features, gt_indices, device, target_chunk_size):
     query = torch.nn.functional.normalize(torch.nan_to_num(query_features.float()), dim=1)
     target = torch.nn.functional.normalize(torch.nan_to_num(target_features.float()), dim=1)
@@ -210,14 +166,7 @@ def nearest_feature_matches(query_features, target_features, gt_indices, device,
 
 
 def round_floats(value, ndigits):
-    """Round every float (recursively, through dicts/lists) to a sane display precision.
-
-    Raw float64 values round-trip with 16-17 significant digits, which is far more precision
-    than this benchmark needs and makes the CSV needlessly fragile in spreadsheet apps whose
-    locale expects a comma decimal separator: a long digit run after a lone "." is exactly the
-    shape that gets misread as thousands-grouped digits, turning e.g. 0.7974902987480164 into an
-    apparent value in the millions. Rounding here does not change what the benchmark measured.
-    """
+    """Round floats inside nested dicts/lists. Long digit runs confuse spreadsheet imports."""
     if isinstance(value, float):
         return round(value, ndigits)
     if isinstance(value, dict):
@@ -246,18 +195,15 @@ def summarize(values, prefix):
 
 
 def evaluate(args):
-    device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
+    device = pick_device(args.device)
     print(f"Using device: {device}")
 
-    source_vertices = load_geometry_vertices(args.source_geometry)
-    target_vertices = load_geometry_vertices(args.target_geometry)
+    source_vertices = load_vertices(args.source_geometry)
+    target_vertices = load_vertices(args.target_geometry)
     source_features = load_features(args.source_features)
     target_features = load_features(args.target_features)
-
-    if len(source_vertices) != len(source_features):
-        raise ValueError("Source geometry point/vertex count does not match source feature rows.")
-    if len(target_vertices) != len(target_features):
-        raise ValueError("Target geometry point/vertex count does not match target feature rows.")
+    check_rows(args.source_name, len(source_vertices), len(source_features))
+    check_rows(args.target_name, len(target_vertices), len(target_features))
     if source_features.shape[1] != target_features.shape[1]:
         raise ValueError("Source and target feature dimensions differ.")
 

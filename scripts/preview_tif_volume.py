@@ -1,12 +1,22 @@
+"""Slices, maximum-intensity projections, threshold overlays and a histogram of a CT volume.
+
+Use these to choose the crop box (ROI) and the threshold before converting a
+scan to a mesh or point cloud.
+"""
+
 import argparse
 import math
 from pathlib import Path
+import sys
 
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
-from skimage import filters
-import tifffile
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from bugnist_tools.ct import add_threshold_args, crop_roi, load_volume, resolve_threshold
 
 AXES = {"z": 0, "y": 1, "x": 2}
 
@@ -28,22 +38,8 @@ def parse_args():
     parser.add_argument("--downsample", type=int, default=1, help="Preview stride in Z/Y/X.")
     parser.add_argument("--roi-start", type=int, nargs=3, metavar=("Z", "Y", "X"))
     parser.add_argument("--roi-size", type=int, nargs=3, metavar=("Z", "Y", "X"))
-    parser.add_argument(
-        "--threshold-method",
-        choices=("auto", "manual", "percentile", "otsu"),
-        default="auto",
-        help=(
-            "How to choose the overlay threshold. "
-            "auto uses --threshold if supplied, then --threshold-percentile if supplied, otherwise Otsu."
-        ),
-    )
-    parser.add_argument("--threshold", type=float, help="Manual intensity threshold for overlay.")
-    parser.add_argument(
-        "--threshold-percentile",
-        type=float,
-        help="Intensity percentile for red overlay, e.g. 95.",
-    )
-    parser.add_argument("--no-overlay", action="store_true", help="Skip threshold-overlay sheets.")
+    add_threshold_args(parser)
+    parser.add_argument("--no-overlay", action="store_true", help="Skip the threshold-overlay sheets.")
     return parser.parse_args()
 
 
@@ -52,16 +48,7 @@ def apply_roi(volume, roi_start, roi_size):
         return volume, np.zeros(3, dtype=int)
     if roi_start is None or roi_size is None:
         raise ValueError("--roi-start and --roi-size must be used together.")
-
-    start = np.array(roi_start, dtype=int)
-    size = np.array(roi_size, dtype=int)
-    if np.any(start < 0) or np.any(size <= 0):
-        raise ValueError("ROI start must be non-negative and ROI size must be positive.")
-
-    stop = np.minimum(start + size, volume.shape)
-    start = np.minimum(start, stop)
-    slices = tuple(slice(int(s), int(e)) for s, e in zip(start, stop))
-    return volume[slices], start
+    return crop_roi(volume, roi_start, roi_size)
 
 
 def normalize_to_u8(image, low, high):
@@ -119,44 +106,11 @@ def selected_indices(length, count):
     return np.linspace(0, length - 1, count, dtype=int).tolist()
 
 
-def threshold_value(volume, threshold, threshold_percentile, threshold_method):
-    finite = volume[np.isfinite(volume)]
-    if finite.size == 0:
-        raise ValueError("Input volume has no finite voxels.")
-
-    method = threshold_method
-    if method == "auto":
-        if threshold is not None:
-            method = "manual"
-        elif threshold_percentile is not None:
-            method = "percentile"
-        else:
-            method = "otsu"
-
-    if method == "manual":
-        if threshold is None:
-            raise ValueError("--threshold-method manual requires --threshold.")
-        if threshold_percentile is not None:
-            raise ValueError("Use either --threshold or --threshold-percentile, not both.")
-        return float(threshold), "manual"
-
-    if method == "percentile":
-        if threshold is not None:
-            raise ValueError("Use either --threshold or --threshold-percentile, not both.")
-        if threshold_percentile is None:
-            raise ValueError("--threshold-method percentile requires --threshold-percentile.")
-        return float(np.percentile(finite, threshold_percentile)), f"p{threshold_percentile:g}"
-
-    if threshold is not None or threshold_percentile is not None:
-        raise ValueError("--threshold-method otsu chooses the threshold automatically; omit manual threshold args.")
-    return float(filters.threshold_otsu(finite)), "otsu"
-
-
 def write_slices(volume, outdir, stem, axes, low, high, threshold, threshold_percentile, threshold_method, overlay, count):
     mask = None
     threshold_label = None
     if overlay:
-        threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
+        threshold, method_label = resolve_threshold(volume, threshold, threshold_percentile, threshold_method)
         threshold_label = f"{method_label}_thr_{threshold:.2f}"
         mask = volume > threshold
 
@@ -191,7 +145,7 @@ def write_mips(volume, outdir, stem, low, high, threshold, threshold_percentile,
     mask = None
     threshold_label = None
     if overlay:
-        threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
+        threshold, method_label = resolve_threshold(volume, threshold, threshold_percentile, threshold_method)
         threshold_label = f"{method_label}_thr_{threshold:.2f}"
         mask = volume > threshold
 
@@ -229,7 +183,7 @@ def write_histogram(volume, outdir, stem, threshold, threshold_percentile, thres
         y1 = y0 - int(value / max_h * plot_h)
         draw.rectangle((x0, y1, max(x1, x0 + 1), y0), fill=(95, 103, 112))
 
-    threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
+    threshold, method_label = resolve_threshold(volume, threshold, threshold_percentile, threshold_method)
     x_thr = margin + int((threshold - edges[0]) / max(edges[-1] - edges[0], 1e-6) * plot_w)
     draw.line((x_thr, margin, x_thr, height - margin), fill=(230, 70, 30), width=3)
     draw.text(
@@ -247,7 +201,7 @@ def write_histogram(volume, outdir, stem, threshold, threshold_percentile, thres
 
 
 def write_summary(volume, outdir, stem, original_shape, offset, low, high, threshold, threshold_percentile, threshold_method):
-    threshold, method_label = threshold_value(volume, threshold, threshold_percentile, threshold_method)
+    threshold, method_label = resolve_threshold(volume, threshold, threshold_percentile, threshold_method)
     lines = [
         f"stem: {stem}",
         f"original_shape_zyx: {tuple(original_shape)}",
@@ -268,9 +222,7 @@ def write_summary(volume, outdir, stem, original_shape, offset, low, high, thres
 
 def preview_volume(path, args):
     path = Path(path)
-    volume = tifffile.imread(path)
-    if volume.ndim != 3:
-        raise ValueError(f"Expected a 3D TIFF volume, got shape {volume.shape}")
+    volume = load_volume(path)
 
     original_shape = volume.shape
     volume, offset = apply_roi(volume, args.roi_start, args.roi_size)

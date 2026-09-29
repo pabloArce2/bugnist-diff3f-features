@@ -1,3 +1,11 @@
+"""Smooth a marching-cubes mesh and optionally reduce its face count.
+
+Taubin smoothing removes the voxel staircase without shrinking the shape much.
+Decimation uses Open3D quadric simplification if it is installed, otherwise
+vertex clustering (merge vertices on a grid, sized by binary search to reach
+--target-faces). The result has a new vertex order: compute a new descriptor.
+"""
+
 import argparse
 from pathlib import Path
 
@@ -78,7 +86,7 @@ def apply_smoothing(mesh, method, iterations, lamb, nu):
 def try_quadric_decimation(mesh, target_faces):
     try:
         simplified = mesh.simplify_quadric_decimation(int(target_faces))
-    except BaseException as exc:
+    except Exception as exc:
         raise RuntimeError(
             "Quadric decimation is unavailable in this environment. "
             "Install Open3D, or use --decimate-method cluster."

@@ -1,3 +1,13 @@
+"""Blender scene with one movable sphere per landmark, for labelling a shape by hand.
+
+Run inside Blender, not the conda environment:
+    blender --background --python scripts/make_blender_landmark_scene.py -- \
+        --geometry mesh.obj --label brownCricket --landmark HEAD_TIP ABDOMEN_TIP --output labels.blend
+
+Open the .blend, move every LM_<name> sphere onto the anatomy, save, then run
+export_blender_landmarks.py.
+"""
+
 import argparse
 import math
 from pathlib import Path

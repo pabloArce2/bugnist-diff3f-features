@@ -1,3 +1,10 @@
+"""Blender scene with the source and target shapes side by side and a line per match.
+
+    blender --background --python scripts/make_blender_correspondence_scene.py -- \
+        --source-label A --source-mesh a.obj --target-label B --target-mesh b.obj \
+        --matches A_to_B_matches.csv --output A_to_B.blend
+"""
+
 import argparse
 import csv
 import math

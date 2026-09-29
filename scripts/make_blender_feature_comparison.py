@@ -1,3 +1,9 @@
+"""Blender scene with several coloured PLYs side by side, using their vertex colours.
+
+    blender --background --python scripts/make_blender_feature_comparison.py -- \
+        --item brown brown_shared_pca.ply --item black black_shared_pca.ply --output compare.blend
+"""
+
 import argparse
 import math
 from pathlib import Path

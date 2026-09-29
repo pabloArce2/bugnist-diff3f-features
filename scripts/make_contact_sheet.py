@@ -1,3 +1,11 @@
+"""Tile existing images into one labelled grid.
+
+    python scripts/make_contact_sheet.py --cell brown pca a.png --cell brown k6 b.png \
+        --cell black pca c.png --cell black k6 d.png --out grid.png
+
+Rows and columns appear in the order their labels are first used.
+"""
+
 import argparse
 from pathlib import Path
 

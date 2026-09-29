@@ -7,7 +7,7 @@ from pytorch3d.renderer import (
 )
 from pytorch3d.structures import Pointclouds
 
-from camera_sampling import get_view_angles
+from bugnist_tools.camera_sampling import get_view_angles
 
 
 def depth_to_render_images(raw_depth):

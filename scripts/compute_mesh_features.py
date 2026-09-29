@@ -1,3 +1,9 @@
+"""Compute Diff3F descriptors for one or more meshes.
+
+Writes <outdir>/<mesh stem>_diff3f.pt, a float16 tensor of shape
+[num_vertices, 2048]. Row i belongs to vertex i of the input OBJ/PLY.
+"""
+
 import argparse
 from pathlib import Path
 import sys
@@ -8,9 +14,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from bugnist_tools.camera_sampling import VIEW_SAMPLINGS, validate_view_count
+from bugnist_tools.debug_capture import DescriptorDebugWriter, create_debug_run_directory, parse_debug_views
+from bugnist_tools.util import pick_device, prompts_per_input
 from dataloaders.mesh_container import MeshContainer
-from camera_sampling import VIEW_SAMPLINGS, validate_view_count
-from descriptor_debug_capture import DescriptorDebugWriter, create_debug_run_directory, parse_debug_views
 from diff3f import get_features_per_vertex
 from diffusion import init_pipe
 from dino import init_dino
@@ -20,46 +27,34 @@ from utils import convert_mesh_container_to_torch_mesh
 def parse_args():
     parser = argparse.ArgumentParser(description="Compute Diff3F features for one or more meshes.")
     parser.add_argument("--mesh", nargs="+", required=True, help="Mesh files to process.")
-    parser.add_argument(
-        "--prompt",
-        nargs="+",
-        required=True,
-        help="Prompt per mesh, or one prompt reused for all meshes.",
-    )
-    parser.add_argument("--outdir", default="output/hpc_features", help="Directory for .pt outputs.")
+    parser.add_argument("--prompt", nargs="+", required=True, help="One prompt per mesh, or one prompt for all.")
+    parser.add_argument("--outdir", default="output/hpc_features", help="Directory for the .pt files.")
     parser.add_argument("--device", default=None, help="Torch device, e.g. cuda:0 or cpu.")
     parser.add_argument("--num-views", type=int, default=100)
     parser.add_argument(
         "--view-sampling",
         choices=VIEW_SAMPLINGS,
         default="grid",
-        help="Camera sampling strategy. grid is the original Diff3F behavior.",
+        help="Camera layout; grid is the original Diff3F one.",
     )
     parser.add_argument("--height", type=int, default=512)
     parser.add_argument("--width", type=int, default=512)
-    parser.add_argument("--tolerance", type=float, default=0.01)
-    parser.add_argument("--tosca", action="store_true", help="Scale meshes as TOSCA meshes.")
     parser.add_argument(
-        "--debug-outdir",
-        default=None,
-        help="Capture the exact per-view images used by this descriptor under a new run folder.",
+        "--tolerance",
+        type=float,
+        default=0.01,
+        help="Ball-query radius for assigning pixels to vertices, as a fraction of the mesh diameter.",
     )
+    parser.add_argument("--tosca", action="store_true", help="Divide coordinates by 10, as for the TOSCA meshes.")
+    parser.add_argument("--debug-outdir", default=None, help="Also save the per-view images of this run here.")
     parser.add_argument(
         "--debug-views",
         default="all",
-        help="Views to capture: 'all', indices such as '0 4 8', or ranges such as '0-3'.",
+        help="Views to save with --debug-outdir: 'all', indices like '0 4 8', or ranges like '0-3'.",
     )
-    parser.add_argument("--no-normal-map", action="store_true", help="Disable normal-map ControlNet input.")
-    parser.add_argument("--skip-existing", action="store_true", help="Do not recompute existing outputs.")
+    parser.add_argument("--no-normal-map", action="store_true", help="Use only the depth ControlNet.")
+    parser.add_argument("--skip-existing", action="store_true", help="Skip meshes whose .pt already exists.")
     return parser.parse_args()
-
-
-def prompts_for_meshes(prompts, mesh_count):
-    if len(prompts) == 1:
-        return prompts * mesh_count
-    if len(prompts) != mesh_count:
-        raise ValueError("--prompt must have either one value or the same number of values as --mesh.")
-    return prompts
 
 
 def main():
@@ -68,17 +63,16 @@ def main():
     if args.debug_outdir:
         parse_debug_views(args.debug_views, args.num_views)
 
-    device = torch.device(args.device or ("cuda:0" if torch.cuda.is_available() else "cpu"))
+    device = pick_device(args.device)
     if device.type == "cuda":
         torch.cuda.set_device(device)
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    prompts = prompts_for_meshes(args.prompt, len(args.mesh))
+    prompts = prompts_per_input(args.prompt, len(args.mesh), "--mesh")
 
     print(f"Using device: {device}")
     print(f"View sampling: {args.view_sampling} ({args.num_views} views)")
-    print(f"CUDA available: {torch.cuda.is_available()}")
     if torch.cuda.is_available():
         print(f"GPU: {torch.cuda.get_device_name(device)}")
 
@@ -87,9 +81,9 @@ def main():
     debug_run_dir = None
     if args.debug_outdir:
         debug_run_dir = create_debug_run_directory(args.debug_outdir, "mesh")
-        print(f"Capturing exact descriptor-run images in {debug_run_dir}")
+        print(f"Saving per-view images in {debug_run_dir}")
         if args.skip_existing:
-            print("Ignoring --skip-existing because image capture requires a fresh descriptor run.")
+            print("Ignoring --skip-existing: saving images needs a fresh descriptor run.")
 
     for mesh_index, (mesh_path, prompt) in enumerate(zip(args.mesh, prompts)):
         mesh_path = Path(mesh_path)
@@ -100,11 +94,8 @@ def main():
 
         print(f"Processing {mesh_path} with prompt {prompt!r}")
         mesh_container = MeshContainer().load_from_file(str(mesh_path))
-        mesh = convert_mesh_container_to_torch_mesh(
-            mesh_container,
-            device=device,
-            is_tosca=args.tosca,
-        )
+        mesh = convert_mesh_container_to_torch_mesh(mesh_container, device=device, is_tosca=args.tosca)
+
         debug_writer = None
         if debug_run_dir is not None:
             debug_writer = DescriptorDebugWriter(
